@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
 import { TaskDialog } from './TaskDialog';
 import { Task } from '@/types/project';
-import { AlertTriangle, ShieldAlert, ChevronDown, Pencil } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ChevronDown, Pencil, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
+import { supabase } from '@/integrations/supabase/client';
 
 const RISK_LABELS = {
   impact: ['', 'Negligible', 'Minor', 'Moderate', 'Major', 'Severe'],
@@ -32,6 +33,7 @@ export function RiskRegistry() {
   const { project, updateTask } = useProject();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [previousCounts, setPreviousCounts] = useState<{ Critical: number; High: number; Medium: number; Low: number } | null>(null);
 
   function flattenAllTasks(tasks: typeof project.buckets[0]['tasks']): typeof project.buckets[0]['tasks'] {
     const result: typeof project.buckets[0]['tasks'] = [];
@@ -70,6 +72,58 @@ export function RiskRegistry() {
     });
   };
 
+  // Compute current counts
+  const currentCounts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+  flaggedTasks.forEach(t => {
+    const level = getRiskLevel(t.riskImpact, t.riskProbability).label;
+    currentCounts[level as keyof typeof currentCounts]++;
+  });
+
+  // Save today's snapshot and fetch previous snapshot
+  const saveAndFetchSnapshot = useCallback(async () => {
+    if (!project.id) return;
+
+    // Upsert today's snapshot
+    await supabase.from('risk_snapshots').upsert({
+      project_id: project.id,
+      snapshot_date: new Date().toISOString().split('T')[0],
+      critical_count: currentCounts.Critical,
+      high_count: currentCounts.High,
+      medium_count: currentCounts.Medium,
+      low_count: currentCounts.Low,
+    }, { onConflict: 'project_id,snapshot_date' });
+
+    // Fetch the most recent snapshot before today
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await supabase
+      .from('risk_snapshots')
+      .select('*')
+      .eq('project_id', project.id)
+      .lt('snapshot_date', today)
+      .order('snapshot_date', { ascending: false })
+      .limit(1);
+
+    if (data && data.length > 0) {
+      setPreviousCounts({
+        Critical: data[0].critical_count,
+        High: data[0].high_count,
+        Medium: data[0].medium_count,
+        Low: data[0].low_count,
+      });
+    }
+  }, [project.id, currentCounts.Critical, currentCounts.High, currentCounts.Medium, currentCounts.Low]);
+
+  useEffect(() => {
+    saveAndFetchSnapshot();
+  }, [saveAndFetchSnapshot]);
+
+  const getTrend = (current: number, previous: number | undefined) => {
+    if (previous === undefined) return null;
+    if (current > previous) return 'up';
+    if (current < previous) return 'down';
+    return 'same';
+  };
+
   return (
     <div className="flex-1 overflow-auto">
       <div className="p-6">
@@ -84,33 +138,45 @@ export function RiskRegistry() {
         </div>
 
         {/* Risk Summary Cards */}
-        {flaggedTasks.length > 0 && (() => {
-          const counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
-          flaggedTasks.forEach(t => {
-            const level = getRiskLevel(t.riskImpact, t.riskProbability).label;
-            counts[level as keyof typeof counts]++;
-          });
+        {(() => {
           const cards = [
-            { label: 'Critical', count: counts.Critical, color: 'hsl(var(--status-stuck))', bg: 'hsl(var(--status-stuck) / 0.1)' },
-            { label: 'High', count: counts.High, color: 'hsl(var(--status-working))', bg: 'hsl(var(--status-working) / 0.1)' },
-            { label: 'Medium', count: counts.Medium, color: 'hsl(var(--priority-medium))', bg: 'hsl(var(--priority-medium) / 0.1)' },
-            { label: 'Low', count: counts.Low, color: 'hsl(var(--status-done))', bg: 'hsl(var(--status-done) / 0.1)' },
+            { label: 'Critical' as const, count: currentCounts.Critical, prevKey: 'Critical' as const, color: 'hsl(var(--status-stuck))', bg: 'hsl(var(--status-stuck) / 0.1)' },
+            { label: 'High' as const, count: currentCounts.High, prevKey: 'High' as const, color: 'hsl(var(--status-working))', bg: 'hsl(var(--status-working) / 0.1)' },
+            { label: 'Medium' as const, count: currentCounts.Medium, prevKey: 'Medium' as const, color: 'hsl(var(--priority-medium))', bg: 'hsl(var(--priority-medium) / 0.1)' },
+            { label: 'Low' as const, count: currentCounts.Low, prevKey: 'Low' as const, color: 'hsl(var(--status-done))', bg: 'hsl(var(--status-done) / 0.1)' },
           ];
           return (
             <div className="grid grid-cols-4 gap-3 mb-8">
-              {cards.map(c => (
-                <div
-                  key={c.label}
-                  className="rounded-xl border p-4 flex flex-col items-center gap-1"
-                  style={{ backgroundColor: c.bg }}
-                >
-                  <span className="text-2xl font-bold" style={{ color: c.color }}>{c.count}</span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
-                    <span className="text-xs font-medium text-muted-foreground">{c.label}</span>
+              {cards.map(c => {
+                const trend = previousCounts ? getTrend(c.count, previousCounts[c.prevKey]) : null;
+                const diff = previousCounts ? c.count - previousCounts[c.prevKey] : 0;
+                return (
+                  <div
+                    key={c.label}
+                    className="rounded-xl border p-4 flex flex-col items-center gap-1"
+                    style={{ backgroundColor: c.bg }}
+                  >
+                    <span className="text-2xl font-bold" style={{ color: c.color }}>{c.count}</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
+                      <span className="text-xs font-medium text-muted-foreground">{c.label}</span>
+                    </div>
+                    {trend && (
+                      <div className={cn(
+                        "flex items-center gap-1 mt-1 text-[10px] font-medium",
+                        trend === 'up' && "text-destructive",
+                        trend === 'down' && "text-emerald-500",
+                        trend === 'same' && "text-muted-foreground"
+                      )}>
+                        {trend === 'up' && <TrendingUp className="w-3 h-3" />}
+                        {trend === 'down' && <TrendingDown className="w-3 h-3" />}
+                        {trend === 'same' && <Minus className="w-3 h-3" />}
+                        <span>{trend === 'same' ? 'No change' : `${diff > 0 ? '+' : ''}${diff} vs prev`}</span>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         })()}
