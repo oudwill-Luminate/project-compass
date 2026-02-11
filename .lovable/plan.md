@@ -1,95 +1,47 @@
 
 
-## Enhanced Project Overview Tab
+## Slack Visualization Enhancements
 
-### Overview
-Upgrade the existing Project Overview page with a Markdown editor (write + preview toggle) for the Project Charter, and add a "Project Health" traffic-light widget showing Schedule, Budget, and Risk status derived from live project data.
+### What's Already Done
+- The backward-pass calculation already exists in `src/lib/criticalPath.ts` and produces a `slackDays` map
+- The "Slack" column already exists in `tableColumns.ts` and renders in `TaskRow.tsx`
+- `TableView.tsx` already computes and passes `slackDays` to each `TaskRow`
 
----
+### What Needs to Change
 
-### 1. Markdown Editor with Preview (no new dependencies)
+#### 1. Centralize slack computation in `useProjectData.ts`
+Move the `computeCriticalPath` call out of individual views and into the project data hook so all views share the same computed slack data. This avoids redundant recalculation across TableView and TimelineView.
 
-Rather than adding a heavy rich-text library like Tiptap, use a lightweight **write/preview toggle** approach that works with the existing Markdown stored in `charter_markdown`:
+- Add a `useMemo` in `useProjectData` that calls `computeCriticalPath` on all flattened tasks
+- Expose `slackDays` and `criticalTaskIds` from the hook's return value
+- Update `TableView.tsx` and `TimelineView.tsx` to consume these from the project context instead of computing locally
 
-- **Write mode**: Keep the current `Textarea` (mono font) for editing raw Markdown
-- **Preview mode**: Render the Markdown as formatted HTML using a small custom parser (handles headings, bold, italic, lists, line breaks) -- no external library needed
-- A `Tabs` component (already available via Radix) switches between "Write" and "Preview"
+#### 2. Expose slack data via `ProjectContext`
+Add `slackDays` and `criticalTaskIds` to the context value so any component can access them.
 
-This avoids adding a dependency while giving a much better authoring experience than the current raw textarea.
+#### 3. Add dotted slack line in `TimelineView.tsx`
+For each leaf task with positive slack (slack > 0), render a thin dotted/dashed line extending from the end of the task bar to the right, spanning the number of slack days. This shows the "safety window" -- how far the task could slip without affecting the project end date.
 
----
+- Pass `slackDays` map into `TaskTimelineRow`
+- After the task bar, render a new `div` with a dashed border style
+- Width calculated as `(slackDays / totalDays) * 100%`
+- Positioned starting at the right edge of the task bar
+- Styled as a thin dashed line in a muted color (e.g., `border-dashed border-muted-foreground/40`)
+- Add a tooltip showing "Slack: X days"
+- Only rendered for leaf tasks (no sub-tasks)
 
-### 2. Project Health Widget
-
-A card with three traffic-light indicators for **Schedule**, **Budget**, and **Risk**, each showing a colored dot (green/yellow/red) with a short label.
-
-**Schedule Health** (derived from task data):
-- **Green**: >= 80% of tasks are on-time (end date on or before baseline, or no baseline set and status is done/working)
-- **Yellow**: 50-79% on-time
-- **Red**: < 50% on-time, or any critical-path task is "stuck"
-
-**Budget Health** (derived from cost data):
-- **Green**: Total actual cost <= 90% of total estimated cost
-- **Yellow**: 90-100% of estimated
-- **Red**: Over budget (actual > estimated)
-
-**Risk Health** (derived from risk-flagged tasks):
-- **Green**: No high-impact risks (impact * probability < 12)
-- **Yellow**: Some moderate risks (any task with score 9-15)
-- **Red**: Any task with risk score >= 16 (impact * probability), or more than 3 flagged risks
+#### 4. Update Timeline legend
+Add a "Slack" entry to the legend showing the dotted line style.
 
 ---
 
-### 3. Layout Restructure
+### Technical Details
 
-The page will be reorganized into sections:
+**Files to modify:**
+- `src/hooks/useProjectData.ts` -- add `computeCriticalPath` call, return `slackDays` and `criticalTaskIds`
+- `src/context/ProjectContext.tsx` -- expose `slackDays` and `criticalTaskIds` in context
+- `src/components/TimelineView.tsx` -- consume from context, pass `slackDays` to row, render dotted slack line, update legend
+- `src/components/TableView.tsx` -- remove local `computeCriticalPath` call, use context instead
 
-```text
-+------------------------------------------+
-|  Project Overview header                 |
-+------------------------------------------+
-|  [ Project Health Widget ]               |
-|  Schedule: (G)  Budget: (G)  Risk: (Y)   |
-+------------------------------------------+
-|  Project Charter                         |
-|  [Write] [Preview]                       |
-|  +------------------------------------+  |
-|  |  Markdown editor / rendered view   |  |
-|  +------------------------------------+  |
-|  [Save Charter]                          |
-+------------------------------------------+
-|  Project Goals (unchanged)               |
-+------------------------------------------+
-```
-
----
-
-### 4. Files to Change
-
-| File | Action |
-|------|--------|
-| `src/components/ProjectOverview.tsx` | Major rewrite: add health widget, add Markdown preview tabs |
-| `src/lib/projectHealth.ts` | New file: pure utility functions to compute schedule/budget/risk health status |
-
-No new dependencies required -- uses existing `Tabs` component from Radix and the `computeCriticalPath` utility.
-
----
-
-### 5. Technical Details
-
-**Health computation (`src/lib/projectHealth.ts`)**:
-
-```text
-type HealthStatus = 'green' | 'yellow' | 'red';
-
-function computeScheduleHealth(tasks, criticalTaskIds) -> HealthStatus
-function computeBudgetHealth(tasks, contingencyPercent) -> HealthStatus  
-function computeRiskHealth(tasks) -> HealthStatus
-```
-
-Each function is pure and takes the flattened task list as input, returning a simple status string.
-
-**Markdown preview**: A simple function that converts basic Markdown syntax (headings, bold, italic, lists, paragraphs) into React elements. This covers the typical charter content without needing a full Markdown library.
-
-**Traffic light rendering**: Each indicator is a flex row with a colored circle (`w-3 h-3 rounded-full`) and label text. Colors map to Tailwind classes: `bg-green-500`, `bg-yellow-500`, `bg-red-500`.
+**No database changes required.**
 
