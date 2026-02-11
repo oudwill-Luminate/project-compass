@@ -71,9 +71,10 @@ interface TaskRowProps {
   dragHandleProps?: DraggableProvidedDragHandleProps | null;
   gridCols: string;
   visibleColumnIds: string[];
+  slackDays?: Map<string, number>;
 }
 
-export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProps, gridCols: gridColsProp, visibleColumnIds: visibleColsProp }: TaskRowProps) {
+export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProps, gridCols: gridColsProp, visibleColumnIds: visibleColsProp, slackDays }: TaskRowProps) {
   const { updateTask, deleteTask, getTaskById, addTask } = useProject();
   const defaultColIds = ['drag','task','status','priority','owner','responsible','start','end','estCost','actual','actions'];
   const visibleColumnIds = visibleColsProp ?? defaultColIds;
@@ -288,6 +289,25 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
     );
   }
 
+  if (show('slack')) {
+    const slack = slackDays?.get(task.id);
+    const isCritical = slack !== undefined && slack === 0;
+    cells.push(
+      <span
+        key="slack"
+        className={cn(
+          'text-right text-xs font-medium tabular-nums',
+          isCritical && 'text-orange-600 font-bold',
+          slack !== undefined && slack > 0 && slack <= 2 && 'text-amber-600',
+          (slack === undefined || slack > 2) && 'text-muted-foreground'
+        )}
+        title={isCritical ? 'Critical path — zero slack' : `${slack ?? '—'} days of slack`}
+      >
+        {slack !== undefined ? `${slack}d` : '—'}
+      </span>
+    );
+  }
+
   if (show('slippage')) {
     const hasBaseline = task.baselineEndDate && task.baselineStartDate;
     if (hasBaseline) {
@@ -402,6 +422,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
           depth={depth + 1}
           gridCols={gridCols}
           visibleColumnIds={visibleColumnIds}
+          slackDays={slackDays}
         />
       ))}
 
