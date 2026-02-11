@@ -1,155 +1,89 @@
 
 
-## Scheduling Refinements: Circular Dependency Detection, Working-Day Logic, and Weekend Toggle
+## Monday-Style Polish for TableView
 
 ### Overview
 
-This plan covers three related improvements:
-1. Detect circular dependencies before saving and show an error toast
-2. Update the `scheduleTask` function to skip weekends (Sat/Sun) by default
-3. Add a toggle in Project Settings to include weekends as working days
+Add visual polish inspired by Monday.com: hover glow effects on task rows with reveal-on-hover drag handles, and smooth framer-motion layout animations for bucket expand/collapse.
 
 ---
 
-### 1. Database Migration
+### 1. Task Row Hover Glow and Drag Handle Reveal
 
-Add a `include_weekends` boolean column to the `projects` table:
+**File: `src/components/TaskRow.tsx`**
 
-```sql
-ALTER TABLE public.projects
-  ADD COLUMN include_weekends boolean NOT NULL DEFAULT false;
+- Add a CSS `group` class to the row container div so child elements can respond to hover state
+- Hide the drag handle by default using `opacity-0` and reveal it on row hover with `group-hover:opacity-100` plus a smooth transition
+- Replace the plain `hover:bg-muted/40` with a more polished glow effect using a subtle box-shadow or a gradient background on hover:
+  - Add `transition-all duration-200` for smoothness
+  - On hover: apply a soft left-edge glow using the bucket color and a light background highlight
+
+**Changes to the row div (line ~309-314):**
+```tsx
+<div
+  className={cn(
+    "group grid gap-0 px-4 py-2.5 border-t transition-all duration-200 items-center text-sm",
+    "hover:bg-primary/[0.03] hover:shadow-[inset_3px_0_0_0_var(--glow-color)]",
+    hasSubTasks && "font-medium bg-muted/10"
+  )}
+  style={{
+    gridTemplateColumns: gridCols,
+    borderLeft: `4px solid ${bucketColor}15`,
+    paddingLeft: `${16 + indent}px`,
+    '--glow-color': bucketColor,
+  } as React.CSSProperties}
+>
 ```
 
-No new RLS policies needed -- existing project update/select policies cover this column.
+**Drag handle (line ~126-133):** Change from always-visible to hover-revealed:
+```tsx
+<div {...dragHandleProps} className="flex items-center cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+  <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />
+</div>
+```
+
+The placeholder `<div className="w-3.5" />` for non-draggable rows stays hidden.
 
 ---
 
-### 2. Type Updates
+### 2. Smooth Bucket Expand/Collapse with Framer Motion
 
-**`src/types/project.ts`** -- Add `includeWeekends` to the `Project` interface:
+**File: `src/components/TableView.tsx`**
 
-```typescript
-export interface Project {
-  id: string;
-  name: string;
-  contingencyPercent: number;
-  includeWeekends: boolean;
-  buckets: Bucket[];
-}
+The current implementation already uses `AnimatePresence` and `motion.div` with `height: 0 -> auto` for bucket collapse. The refinement will:
+
+- Add `layout` prop to each `Draggable` wrapper so rows animate their position when siblings appear/disappear
+- Adjust the existing `motion.div` animation to use a spring transition for a more natural feel instead of the current `easeInOut`:
+
+```tsx
+<motion.div
+  initial={{ height: 0, opacity: 0 }}
+  animate={{ height: 'auto', opacity: 1 }}
+  exit={{ height: 0, opacity: 0 }}
+  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+  className="overflow-hidden"
+>
 ```
+
+- Wrap each bucket's outer `div` (inside the `Draggable` render) with `motion.div` using `layout` transition so buckets below a collapsing bucket slide up smoothly:
+
+```tsx
+<motion.div
+  layout
+  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+  ref={bucketDragProvided.innerRef}
+  {...bucketDragProvided.draggableProps}
+  className={cn("rounded-xl border overflow-visible shadow-sm", ...)}
+>
+```
+
+- Add `<LayoutGroup>` wrapper from framer-motion around the bucket list to coordinate layout animations across siblings.
 
 ---
 
-### 3. Scheduling Logic (`src/hooks/useProjectData.ts`)
+### 3. Optional: Actions Column Hover Reveal
 
-**a) Circular dependency detection function**
-
-Add a `detectCircularDependency` helper that walks the dependency chain from a given task. If it encounters the starting task again, a cycle exists.
-
-```typescript
-function detectCircularDependency(
-  taskId: string,
-  proposedDependsOn: string,
-  allTasks: Task[]
-): boolean {
-  const visited = new Set<string>();
-  let current: string | null = proposedDependsOn;
-  while (current) {
-    if (current === taskId) return true; // cycle found
-    if (visited.has(current)) break;
-    visited.add(current);
-    const task = allTasks.find(t => t.id === current);
-    current = task?.dependsOn ?? null;
-  }
-  return false;
-}
-```
-
-**b) Use it in `updateTask`** -- When `dependsOn` changes, check for cycles before proceeding. If detected, show `toast.error('Circular dependency detected...')` and return early without saving.
-
-**c) Working-day-aware scheduling**
-
-Add an `addWorkingDays` helper that skips Saturdays and Sundays (when `includeWeekends` is false), and a `workingDaysDiff` helper to count working days between two dates.
-
-```typescript
-function addWorkingDays(start: Date, days: number, includeWeekends: boolean): Date {
-  if (includeWeekends) return addDays(start, days);
-  let result = start;
-  let remaining = Math.abs(days);
-  const direction = days >= 0 ? 1 : -1;
-  while (remaining > 0) {
-    result = addDays(result, direction);
-    const day = result.getDay();
-    if (day !== 0 && day !== 6) remaining--;
-  }
-  return result;
-}
-
-function nextWorkingDay(date: Date, includeWeekends: boolean): Date {
-  if (includeWeekends) return date;
-  let d = date;
-  while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, 1);
-  return d;
-}
-```
-
-Update `scheduleTask` to accept an `includeWeekends` parameter:
-- Calculate duration in working days (not calendar days)
-- Use `addWorkingDays` instead of `addDays` for the new start/end dates
-- Ensure the resulting start date lands on a working day
-
-**d) Pass `includeWeekends` through** -- The `updateTask` function reads `project.includeWeekends` and passes it to `scheduleTask` and the cascade logic.
-
----
-
-### 4. Data Loading (`useProjectData`)
-
-In `fetchAll`, map the new DB column into the Project object:
-
-```typescript
-const proj: Project = {
-  ...
-  includeWeekends: projData.include_weekends ?? false,
-  ...
-};
-```
-
-Add an `updateIncludeWeekends` function (similar to `updateContingency`):
-
-```typescript
-const updateIncludeWeekends = useCallback(async (value: boolean) => {
-  if (!projectId) return;
-  setProject(prev => prev ? { ...prev, includeWeekends: value } : prev);
-  await supabase.from('projects').update({ include_weekends: value }).eq('id', projectId);
-}, [projectId]);
-```
-
-Return it from the hook and expose it through `ProjectContext`.
-
----
-
-### 5. Project Settings UI (`src/components/ProjectSettings.tsx`)
-
-Add a Switch toggle below the Contingency field:
-
-```
-Include Weekends
-[toggle switch]
-When enabled, Saturdays and Sundays are treated as working days for scheduling.
-```
-
-- Uses the `Switch` component from `@/components/ui/switch`
-- Calls `updateIncludeWeekends` directly on toggle (no need for the Save button -- instant save like a preference)
-- OR: track it as part of `hasChanges` and save with the existing Save button
-
-The toggle will be added between the Contingency section and the Save button.
-
----
-
-### 6. Context Updates (`src/context/ProjectContext.tsx`)
-
-- Add `updateIncludeWeekends` to `ProjectContextType` interface
-- Wire it through the provider from the hook
+As a bonus Monday-style touch, the actions menu button (three dots) will also use `opacity-0 group-hover:opacity-100` so it only appears on hover, reducing visual clutter.
 
 ---
 
@@ -157,9 +91,13 @@ The toggle will be added between the Contingency section and the Save button.
 
 | File | Change |
 |------|--------|
-| `supabase/migrations/...` | Add `include_weekends` column |
-| `src/types/project.ts` | Add `includeWeekends` to `Project` |
-| `src/hooks/useProjectData.ts` | Circular detection, working-day helpers, `updateIncludeWeekends`, pass `includeWeekends` to scheduling |
-| `src/context/ProjectContext.tsx` | Expose `updateIncludeWeekends` |
-| `src/components/ProjectSettings.tsx` | Add weekend toggle switch |
+| `src/components/TaskRow.tsx` | Add `group` class, hover glow, drag handle + actions reveal-on-hover |
+| `src/components/TableView.tsx` | Add `layout` + spring transitions to bucket expand/collapse, wrap with `LayoutGroup` |
+
+### Technical Notes
+
+- `LayoutGroup` is imported from `framer-motion` (already installed)
+- The `--glow-color` CSS variable technique avoids needing inline style overrides for the box-shadow
+- Spring transitions (`stiffness: 400, damping: 30`) give a snappy but not bouncy feel similar to Monday.com
+- No new dependencies needed
 
