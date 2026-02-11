@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Project, Task } from '@/types/project';
 import { useProjectData, flattenTasks } from '@/hooks/useProjectData';
 
-type ViewType = 'table' | 'timeline' | 'risk';
+type ViewType = 'table' | 'timeline' | 'risk' | 'settings';
 
 interface ProjectContextType {
   project: Project;
@@ -11,6 +11,8 @@ interface ProjectContextType {
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   toggleBucket: (bucketId: string) => void;
   updateContingency: (percent: number) => void;
+  updateProjectName: (name: string) => void;
+  deleteProject: () => Promise<void>;
   addBucket: (name: string) => void;
   updateBucket: (bucketId: string, updates: { name?: string; color?: string; description?: string; owner_id?: string | null }) => void;
   deleteBucket: (bucketId: string) => void;
@@ -28,7 +30,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -77,6 +79,8 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         updateTask,
         toggleBucket,
         updateContingency,
+        updateProjectName: dbUpdateProjectName,
+        deleteProject: dbDeleteProject,
         addBucket: dbAddBucket,
         updateBucket: dbUpdateBucket,
         deleteBucket: dbDeleteBucket,
