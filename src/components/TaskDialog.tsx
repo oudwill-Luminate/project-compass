@@ -266,8 +266,8 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
             />
           </div>
 
-          {/* Costs */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Costs & Effort */}
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <Label className="text-xs font-medium">Estimated Cost ($)</Label>
               <Input
@@ -283,6 +283,17 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                 type="number"
                 value={formData.actualCost}
                 onChange={e => setFormData({ ...formData, actualCost: Number(e.target.value) })}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-medium">Effort Hours</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.5}
+                value={formData.effortHours}
+                onChange={e => setFormData({ ...formData, effortHours: Number(e.target.value) })}
                 className="mt-1"
               />
             </div>
