@@ -457,35 +457,20 @@ export function useProjectData(projectId: string | undefined) {
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
-    // Cascade: reschedule all dependents using proper dependency-type math
-    const updatedTask = { ...oldTask, ...updates };
-    const visited = new Set<string>();
-
-    const cascadeDependents = async (predecessorTask: Task) => {
-      if (visited.has(predecessorTask.id)) return; // circular dependency prevention
-      visited.add(predecessorTask.id);
-
-      const dependents = allTasks.filter(t => t.dependsOn === predecessorTask.id);
-      for (const dep of dependents) {
-        const scheduled = scheduleTask(predecessorTask, dep, dep.dependencyType, project.includeWeekends);
-        await supabase.from('tasks').update({
-          start_date: scheduled.startDate,
-          end_date: scheduled.endDate,
-        }).eq('id', dep.id);
-
-        // Continue cascading with the updated dependent
-        const updatedDep = { ...dep, startDate: scheduled.startDate, endDate: scheduled.endDate };
-        await cascadeDependents(updatedDep);
-      }
-    };
-
     // Only cascade if dates actually changed
+    const updatedTask = { ...oldTask, ...updates };
     const datesChanged =
       (updates.startDate && updates.startDate !== oldTask.startDate) ||
       (updates.endDate && updates.endDate !== oldTask.endDate);
 
     if (datesChanged) {
-      await cascadeDependents(updatedTask);
+      // Atomic cascade via database function — all dependents rescheduled in a single transaction
+      await supabase.rpc('cascade_task_dates', {
+        _task_id: taskId,
+        _new_start: updatedTask.startDate,
+        _new_end: updatedTask.endDate,
+        _include_weekends: project.includeWeekends,
+      });
     }
 
     // Refetch to sync all cascaded changes
