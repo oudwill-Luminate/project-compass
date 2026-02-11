@@ -237,6 +237,35 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
             </div>
           </div>
 
+          {/* Contingency Buffer */}
+          <div className="p-3 rounded-lg border space-y-3">
+            <div>
+              <Label className="text-xs font-medium">Contingency Buffer (days)</Label>
+              <Input
+                type="number"
+                min={0}
+                value={formData.bufferDays}
+                onChange={e => setFormData({ ...formData, bufferDays: Math.max(0, Number(e.target.value)) })}
+                className="mt-1 w-32"
+              />
+            </div>
+            {formData.bufferDays > 0 && (
+              <div>
+                <Label className="text-xs font-medium">Buffer Position</Label>
+                <Select
+                  value={formData.bufferPosition}
+                  onValueChange={(v: 'start' | 'end') => setFormData({ ...formData, bufferPosition: v })}
+                >
+                  <SelectTrigger className="mt-1 w-40"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="end">After task (end)</SelectItem>
+                    <SelectItem value="start">Before task (start)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
           {/* Risk Flag Toggle */}
           <div className="flex items-center justify-between p-3 rounded-lg border">
             <div className="flex items-center gap-2">

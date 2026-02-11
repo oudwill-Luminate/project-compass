@@ -142,6 +142,8 @@ export type Database = {
         Row: {
           actual_cost: number
           bucket_id: string
+          buffer_days: number
+          buffer_position: string
           created_at: string
           dependency_type: Database["public"]["Enums"]["dependency_type"]
           depends_on: string | null
@@ -163,6 +165,8 @@ export type Database = {
         Insert: {
           actual_cost?: number
           bucket_id: string
+          buffer_days?: number
+          buffer_position?: string
           created_at?: string
           dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
@@ -184,6 +188,8 @@ export type Database = {
         Update: {
           actual_cost?: number
           bucket_id?: string
+          buffer_days?: number
+          buffer_position?: string
           created_at?: string
           dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null

@@ -24,6 +24,8 @@ export interface Task {
   riskImpact: number; // 1-5
   riskProbability: number; // 1-5
   parentTaskId: string | null;
+  bufferDays: number;
+  bufferPosition: 'start' | 'end';
   subTasks: Task[];
 }
 
