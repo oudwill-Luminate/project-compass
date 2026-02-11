@@ -140,6 +140,52 @@ function addSubTaskToTree(tasks: Task[], parentTaskId: string, newTask: Task): T
   });
 }
 
+/** Calculate new dates for a dependent task based on dependency type, preserving duration */
+function scheduleTask(
+  predecessor: { startDate: string; endDate: string },
+  dependent: { startDate: string; endDate: string },
+  depType: DependencyType
+): { startDate: string; endDate: string } {
+  const duration = differenceInDays(parseISO(dependent.endDate), parseISO(dependent.startDate));
+
+  switch (depType) {
+    case 'FS': {
+      // Dependent starts after predecessor finishes
+      const newStart = addDays(parseISO(predecessor.endDate), 1);
+      return {
+        startDate: format(newStart, 'yyyy-MM-dd'),
+        endDate: format(addDays(newStart, duration), 'yyyy-MM-dd'),
+      };
+    }
+    case 'FF': {
+      // Both finish at the same time
+      const newEnd = parseISO(predecessor.endDate);
+      return {
+        startDate: format(addDays(newEnd, -duration), 'yyyy-MM-dd'),
+        endDate: format(newEnd, 'yyyy-MM-dd'),
+      };
+    }
+    case 'SS': {
+      // Both start at the same time
+      const newStart = parseISO(predecessor.startDate);
+      return {
+        startDate: format(newStart, 'yyyy-MM-dd'),
+        endDate: format(addDays(newStart, duration), 'yyyy-MM-dd'),
+      };
+    }
+    case 'SF': {
+      // Dependent finishes when predecessor starts
+      const newEnd = addDays(parseISO(predecessor.startDate), -1);
+      return {
+        startDate: format(addDays(newEnd, -duration), 'yyyy-MM-dd'),
+        endDate: format(newEnd, 'yyyy-MM-dd'),
+      };
+    }
+    default:
+      return { startDate: dependent.startDate, endDate: dependent.endDate };
+  }
+}
+
 export function useProjectData(projectId: string | undefined) {
   const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
@@ -247,6 +293,32 @@ export function useProjectData(projectId: string | undefined) {
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
     if (!project) return;
 
+    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+    const oldTask = allTasks.find(t => t.id === taskId);
+    if (!oldTask) return;
+
+    // If dependency link or type changed, auto-schedule this task's dates
+    const dependencyChanged =
+      (updates.dependsOn !== undefined && updates.dependsOn !== oldTask.dependsOn) ||
+      (updates.dependencyType !== undefined && updates.dependencyType !== oldTask.dependencyType);
+
+    if (dependencyChanged) {
+      const predecessorId = updates.dependsOn !== undefined ? updates.dependsOn : oldTask.dependsOn;
+      const depType = (updates.dependencyType !== undefined ? updates.dependencyType : oldTask.dependencyType) as DependencyType;
+
+      if (predecessorId) {
+        const predecessor = allTasks.find(t => t.id === predecessorId);
+        if (predecessor) {
+          const currentTask = {
+            startDate: updates.startDate || oldTask.startDate,
+            endDate: updates.endDate || oldTask.endDate,
+          };
+          const scheduled = scheduleTask(predecessor, currentTask, depType);
+          updates = { ...updates, startDate: scheduled.startDate, endDate: scheduled.endDate };
+        }
+      }
+    }
+
     // Optimistic update (recursive)
     setProject(prev => {
       if (!prev) return prev;
@@ -274,41 +346,44 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.riskProbability !== undefined) dbUpdates.risk_probability = updates.riskProbability;
     if (updates.parentTaskId !== undefined) dbUpdates.parent_task_id = updates.parentTaskId;
 
-    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
-    const oldTask = allTasks.find(t => t.id === taskId);
+    await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
-    if (oldTask) {
-      let daysDelta = 0;
+    // Cascade: reschedule all dependents using proper dependency-type math
+    const updatedTask = { ...oldTask, ...updates };
+    const visited = new Set<string>();
 
-      if (updates.endDate && updates.endDate !== oldTask.endDate) {
-        daysDelta = differenceInDays(parseISO(updates.endDate), parseISO(oldTask.endDate));
-      } else if (updates.startDate && updates.startDate !== oldTask.startDate) {
-        daysDelta = differenceInDays(parseISO(updates.startDate), parseISO(oldTask.startDate));
-        const duration = differenceInDays(parseISO(oldTask.endDate), parseISO(oldTask.startDate));
-        dbUpdates.end_date = format(addDays(parseISO(updates.startDate), duration), 'yyyy-MM-dd');
+    const cascadeDependents = async (predecessorTask: Task) => {
+      if (visited.has(predecessorTask.id)) return; // circular dependency prevention
+      visited.add(predecessorTask.id);
+
+      const dependents = allTasks.filter(t => t.dependsOn === predecessorTask.id);
+      for (const dep of dependents) {
+        const scheduled = scheduleTask(predecessorTask, dep, dep.dependencyType);
+        await supabase.from('tasks').update({
+          start_date: scheduled.startDate,
+          end_date: scheduled.endDate,
+        }).eq('id', dep.id);
+
+        // Continue cascading with the updated dependent
+        const updatedDep = { ...dep, startDate: scheduled.startDate, endDate: scheduled.endDate };
+        await cascadeDependents(updatedDep);
       }
+    };
 
-      await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
+    // Only cascade if dates actually changed
+    const datesChanged =
+      (updates.startDate && updates.startDate !== oldTask.startDate) ||
+      (updates.endDate && updates.endDate !== oldTask.endDate);
 
-      if (daysDelta !== 0) {
-        const visited = new Set<string>();
-        const shiftDependents = async (parentId: string, delta: number) => {
-          if (visited.has(parentId)) return;
-          visited.add(parentId);
-          const dependents = allTasks.filter(t => t.dependsOn === parentId);
-          for (const dep of dependents) {
-            const newStart = format(addDays(parseISO(dep.startDate), delta), 'yyyy-MM-dd');
-            const newEnd = format(addDays(parseISO(dep.endDate), delta), 'yyyy-MM-dd');
-            await supabase.from('tasks').update({ start_date: newStart, end_date: newEnd }).eq('id', dep.id);
-            await shiftDependents(dep.id, delta);
-          }
-        };
-        await shiftDependents(taskId, daysDelta);
-      }
-    } else {
-      await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
+    if (datesChanged) {
+      await cascadeDependents(updatedTask);
     }
-  }, [project]);
+
+    // Refetch to sync all cascaded changes
+    if (datesChanged || dependencyChanged) {
+      fetchAll();
+    }
+  }, [project, fetchAll]);
 
   const updateContingency = useCallback(async (percent: number) => {
     if (!projectId) return;
