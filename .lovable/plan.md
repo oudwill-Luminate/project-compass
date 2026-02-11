@@ -1,49 +1,36 @@
 
 
-## Add Project Settings View
+## Fix: Budget Amounts Not Displaying on Task Rows
 
-Currently there is no way to edit project-level settings like the contingency percentage, project name, or manage members. This plan adds a "Settings" view accessible from the sidebar.
+### Problem
 
-### What You Will Get
+The estimated cost column shows **$0** for all tasks, but the subtotal shows **$10,000**. This happens because:
 
-A new **Settings** tab in the sidebar (using the existing gear icon) that opens a settings panel where you can:
+- The "Plumbing" parent task has $10,000 stored in the database
+- Its subtasks (Water Lines, Drainage) both have $0
+- The `getRolledUp()` function in `TaskRow.tsx` replaces the parent's cost with the **sum of subtask costs** (0 + 0 = 0)
+- The subtotal uses a different function (`flattenTasks`) that includes the parent's own $10,000, creating a mismatch
 
-- **Rename the project**
-- **Edit the contingency percentage** (the value currently shown as read-only in the sidebar)
-- **Delete the project** (with confirmation)
+### Solution
+
+Update `getRolledUp()` in `src/components/TaskRow.tsx` so that when subtask costs sum to zero, it falls back to the parent task's own stored cost. This way a budget set on a parent task is still visible until costs are distributed to subtasks.
 
 ### Changes
 
-**1. Add "settings" as a view option**
+**File: `src/components/TaskRow.tsx`**
 
-- `src/context/ProjectContext.tsx` -- Expand `ViewType` to include `'settings'`
-- `src/components/Sidebar.tsx` -- Add a Settings entry to the `navItems` array so it appears in the sidebar navigation alongside Table View, Timeline, and Risk Registry. Remove the static contingency display at the bottom (since it will be editable in settings).
+In the `getRolledUp` function (lines 31-34), change the cost calculation:
 
-**2. Create `src/components/ProjectSettings.tsx`**
+```typescript
+// Before:
+const estimatedCost = subs.reduce((s, t) => s + t.estimatedCost, 0);
+const actualCost = subs.reduce((s, t) => s + t.actualCost, 0);
 
-A new component with a form containing:
-- **Project Name** -- text input, pre-filled with current name
-- **Contingency %** -- number input (0-100), pre-filled with current value
-- **Save** button that calls existing `updateContingency` and a new `updateProjectName` function
-- **Delete Project** section with a confirmation dialog that deletes the project and navigates back to the projects list
+// After:
+const subEstimated = subs.reduce((s, t) => s + t.estimatedCost, 0);
+const subActual = subs.reduce((s, t) => s + t.actualCost, 0);
+const estimatedCost = subEstimated > 0 ? subEstimated : task.estimatedCost;
+const actualCost = subActual > 0 ? subActual : task.actualCost;
+```
 
-**3. Add `updateProjectName` to the data layer**
-
-- `src/hooks/useProjectData.ts` -- Add an `updateProjectName` function that updates the project name in the database
-- `src/context/ProjectContext.tsx` -- Expose `updateProjectName` through the context, and add `deleteProject` as well
-
-**4. Wire the new view into Index.tsx**
-
-- `src/pages/Index.tsx` -- Render `<ProjectSettings />` when `activeView === 'settings'`
-
-### Technical Details
-
-| File | Change |
-|------|--------|
-| `src/types/project.ts` | No changes needed |
-| `src/context/ProjectContext.tsx` | Add `'settings'` to `ViewType`, expose `updateProjectName` and `deleteProject` |
-| `src/hooks/useProjectData.ts` | Add `updateProjectName` and `deleteProject` functions |
-| `src/components/Sidebar.tsx` | Add Settings nav item, remove static contingency section |
-| `src/components/ProjectSettings.tsx` | New file -- settings form with name, contingency, and delete |
-| `src/pages/Index.tsx` | Render `ProjectSettings` for settings view |
-
+This is a small, targeted fix -- only 2 lines change in one file.
