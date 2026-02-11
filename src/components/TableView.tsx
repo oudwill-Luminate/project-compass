@@ -9,7 +9,7 @@ import { TaskDialog } from './TaskDialog';
 import { Task } from '@/types/project';
 import { cn } from '@/lib/utils';
 import { format, parseISO, addDays } from 'date-fns';
-import { ALL_COLUMNS, loadVisibleColumns, saveVisibleColumns, buildGridTemplate, getVisibleColumns } from './tableColumns';
+import { ALL_COLUMNS, loadVisibleColumns, saveVisibleColumns, buildGridTemplate, getVisibleColumns, calcMinWidth } from './tableColumns';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,6 +62,7 @@ export function TableView() {
 
   const gridCols = useMemo(() => buildGridTemplate(visibleColumnIds), [visibleColumnIds]);
   const visibleCols = useMemo(() => getVisibleColumns(visibleColumnIds), [visibleColumnIds]);
+  const minWidth = useMemo(() => calcMinWidth(visibleColumnIds), [visibleColumnIds]);
   const toggleableColumns = ALL_COLUMNS.filter(c => !c.locked && c.label);
 
   const today = format(new Date(), 'yyyy-MM-dd');
@@ -149,7 +150,7 @@ export function TableView() {
 
         <div className="overflow-x-auto">
         {/* Column Headers */}
-        <div className="sticky top-0 z-10 bg-background border-b" style={{ minWidth: '900px' }}>
+        <div className="sticky top-0 z-10 bg-background border-b" style={{ minWidth }}>
           <div className="grid gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ gridTemplateColumns: gridCols }}>
             {visibleCols.map(col => (
               <span key={col.id} className={cn(col.align === 'right' && 'text-right')}>
@@ -297,7 +298,7 @@ export function TableView() {
                         {/* Bucket Footer */}
                         <div
                           className="grid gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
-                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}`, minWidth: '900px' }}
+                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}`, minWidth }}
                         >
                           {subtotalCells}
                         </div>

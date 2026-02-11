@@ -54,3 +54,20 @@ export function buildGridTemplate(visibleIds: string[]): string {
 export function getVisibleColumns(visibleIds: string[]): ColumnDef[] {
   return ALL_COLUMNS.filter(c => visibleIds.includes(c.id));
 }
+
+/** Parse a column width like '140px' or 'minmax(200px,1fr)' into its pixel value */
+function parsePixelWidth(width: string): number {
+  const minmax = width.match(/minmax\((\d+)px/);
+  if (minmax) return parseInt(minmax[1], 10);
+  const px = width.match(/^(\d+)px$/);
+  if (px) return parseInt(px[1], 10);
+  return 0;
+}
+
+/** Calculate the minimum width needed for visible columns (plus padding buffer) */
+export function calcMinWidth(visibleIds: string[]): string {
+  const total = ALL_COLUMNS
+    .filter(c => visibleIds.includes(c.id))
+    .reduce((sum, c) => sum + parsePixelWidth(c.width), 0);
+  return `${total + 32}px`;
+}
