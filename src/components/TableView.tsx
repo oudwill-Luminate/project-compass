@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
@@ -178,6 +178,7 @@ export function TableView() {
         <DragDropContext onDragEnd={handleDragEnd}>
           <Droppable droppableId="buckets-list" type="BUCKET">
             {(bucketsProvided) => (
+              <LayoutGroup>
               <div
                 ref={bucketsProvided.innerRef}
                 {...bucketsProvided.droppableProps}
@@ -201,7 +202,9 @@ export function TableView() {
               return (
                 <Draggable key={bucket.id} draggableId={bucket.id} index={bucketIndex}>
                   {(bucketDragProvided, bucketDragSnapshot) => (
-                    <div
+                    <motion.div
+                      layout
+                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                       ref={bucketDragProvided.innerRef}
                       {...bucketDragProvided.draggableProps}
                       className={cn("rounded-xl border overflow-visible shadow-sm", bucketDragSnapshot.isDragging && "shadow-lg ring-2 ring-primary/20")}
@@ -302,7 +305,7 @@ export function TableView() {
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                         className="overflow-hidden"
                       >
                         <Droppable droppableId={bucket.id} type="TASK">
@@ -358,13 +361,14 @@ export function TableView() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                    </div>
+                    </motion.div>
                   )}
                 </Draggable>
               );
             })}
                 {bucketsProvided.placeholder}
               </div>
+              </LayoutGroup>
             )}
           </Droppable>
         </DragDropContext>

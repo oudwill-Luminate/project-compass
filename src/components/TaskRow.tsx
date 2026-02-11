@@ -124,7 +124,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
     cells.push(
       <div key="drag" className="flex items-center gap-0.5">
         {dragHandleProps && depth === 0 ? (
-          <div {...dragHandleProps} className="flex items-center cursor-grab active:cursor-grabbing">
+          <div {...dragHandleProps} className="flex items-center cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity duration-200">
             <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />
           </div>
         ) : (
@@ -266,7 +266,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
       <div key="actions" className="flex justify-end">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="p-1.5 rounded-md hover:bg-muted transition-colors">
+            <button className="p-1.5 rounded-md hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
@@ -307,10 +307,16 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
     <>
       <div
         className={cn(
-          "grid gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm",
+          "group grid gap-0 px-4 py-2.5 border-t transition-all duration-200 items-center text-sm",
+          "hover:bg-primary/[0.03] hover:shadow-[inset_3px_0_0_0_var(--glow-color)]",
           hasSubTasks && "font-medium bg-muted/10"
         )}
-        style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucketColor}15`, paddingLeft: `${16 + indent}px` }}
+        style={{
+          gridTemplateColumns: gridCols,
+          borderLeft: `4px solid ${bucketColor}15`,
+          paddingLeft: `${16 + indent}px`,
+          '--glow-color': bucketColor,
+        } as React.CSSProperties}
       >
         {cells}
       </div>
