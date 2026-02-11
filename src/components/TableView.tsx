@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { differenceInDays, parseISO } from 'date-fns';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff, Target, X } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -10,7 +11,7 @@ import { BucketDialog } from './BucketDialog';
 import { OwnerAvatar } from './OwnerAvatar';
 import { Task } from '@/types/project';
 import { cn } from '@/lib/utils';
-import { format, parseISO, addDays } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { ALL_COLUMNS, loadVisibleColumns, saveVisibleColumns, buildGridTemplate, getVisibleColumns, calcMinWidth } from './tableColumns';
 import {
   DropdownMenu,
@@ -437,8 +438,59 @@ export function TableView() {
           return (
             <div className="mt-6 rounded-xl border bg-muted/20 p-5">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Project Financial Summary
+                Project Financial Summary & Schedule Health
               </h3>
+
+              {/* Slippage Summary */}
+              {(() => {
+                const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+                const tasksWithBaseline = allTasks.filter(t => t.baselineEndDate);
+                const hasBaseline = tasksWithBaseline.length > 0;
+
+                if (!hasBaseline) return null;
+
+                const slippages = tasksWithBaseline.map(t => differenceInDays(parseISO(t.endDate), parseISO(t.baselineEndDate!)));
+                const totalSlip = slippages.reduce((s, d) => s + d, 0);
+                const maxSlip = Math.max(...slippages);
+                const slippedCount = slippages.filter(d => d > 0).length;
+                const aheadCount = slippages.filter(d => d < 0).length;
+                const onTrackCount = slippages.filter(d => d === 0).length;
+
+                return (
+                  <div className="grid grid-cols-5 gap-6 mb-5 pb-5 border-b">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Net Slippage</p>
+                      <p className={cn("text-2xl font-bold tabular-nums", totalSlip > 0 ? "text-destructive" : totalSlip < 0 ? "text-[hsl(var(--status-done))]" : "text-foreground")}>
+                        {totalSlip > 0 ? '+' : ''}{totalSlip}d
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Max Slippage</p>
+                      <p className={cn("text-2xl font-bold tabular-nums", maxSlip > 0 ? "text-destructive" : "text-foreground")}>
+                        {maxSlip > 0 ? '+' : ''}{maxSlip}d
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Slipped</p>
+                      <p className={cn("text-2xl font-bold tabular-nums", slippedCount > 0 ? "text-destructive" : "text-foreground")}>
+                        {slippedCount} <span className="text-xs font-normal text-muted-foreground">tasks</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">On Track</p>
+                      <p className="text-2xl font-bold tabular-nums text-foreground">
+                        {onTrackCount} <span className="text-xs font-normal text-muted-foreground">tasks</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Ahead</p>
+                      <p className={cn("text-2xl font-bold tabular-nums", aheadCount > 0 ? "text-[hsl(var(--status-done))]" : "text-foreground")}>
+                        {aheadCount} <span className="text-xs font-normal text-muted-foreground">tasks</span>
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-4 gap-6 mb-5">
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Total Budget</p>
