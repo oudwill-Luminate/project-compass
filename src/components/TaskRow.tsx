@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical } from 'lucide-react';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
 import { TaskDialog } from './TaskDialog';
 import { cn } from '@/lib/utils';
+import type { DraggableProvidedDragHandleProps } from '@hello-pangea/dnd';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,9 +17,10 @@ import {
 interface TaskRowProps {
   task: Task;
   bucketColor: string;
+  dragHandleProps?: DraggableProvidedDragHandleProps | null;
 }
 
-export function TaskRow({ task, bucketColor }: TaskRowProps) {
+export function TaskRow({ task, bucketColor, dragHandleProps }: TaskRowProps) {
   const { updateTask, getTaskById } = useProject();
   const [editOpen, setEditOpen] = useState(false);
 
@@ -43,11 +45,19 @@ export function TaskRow({ task, bucketColor }: TaskRowProps) {
   return (
     <>
       <div
-        className="grid grid-cols-[1fr_140px_100px_100px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm"
+        className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm"
         style={{ borderLeft: `4px solid ${bucketColor}15` }}
       >
+        <div {...dragHandleProps} className="flex items-center cursor-grab active:cursor-grabbing">
+          <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />
+        </div>
         <div className="flex items-center gap-2 min-w-0">
-          <span className="font-medium text-foreground truncate">{task.title}</span>
+          <button
+            onClick={() => setEditOpen(true)}
+            className="font-medium text-foreground truncate hover:text-primary hover:underline transition-colors text-left"
+          >
+            {task.title}
+          </button>
           {task.dependsOn && (
             <span
               className="text-muted-foreground shrink-0"

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
-import { format, parseISO } from 'date-fns';
-import { CalendarIcon } from 'lucide-react';
-import { Task, TaskStatus, TaskPriority, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
+import { useState, useEffect, useMemo } from 'react';
+import { format, parseISO, differenceInDays, addDays } from 'date-fns';
+import { CalendarIcon, AlertTriangle } from 'lucide-react';
+import { Task, TaskStatus, TaskPriority, DependencyType, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
 import {
@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -22,6 +23,13 @@ import {
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+const DEPENDENCY_LABELS: Record<DependencyType, string> = {
+  'FS': 'Finish-to-Start',
+  'FF': 'Finish-to-Finish',
+  'SS': 'Start-to-Start',
+  'SF': 'Start-to-Finish',
+};
 
 interface TaskDialogProps {
   task: Task;
@@ -34,10 +42,29 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
   const [formData, setFormData] = useState<Task>({ ...task });
 
   useEffect(() => {
-    if (open) {
-      setFormData({ ...task });
-    }
+    if (open) setFormData({ ...task });
   }, [open, task]);
+
+  const duration = useMemo(() => {
+    try {
+      return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate));
+    } catch { return 0; }
+  }, [formData.startDate, formData.endDate]);
+
+  const [durationInput, setDurationInput] = useState<string>('');
+
+  useEffect(() => {
+    setDurationInput(String(duration));
+  }, [duration]);
+
+  const handleDurationChange = (val: string) => {
+    setDurationInput(val);
+    const days = parseInt(val, 10);
+    if (!isNaN(days) && days > 0) {
+      const newEnd = format(addDays(parseISO(formData.startDate), days), 'yyyy-MM-dd');
+      setFormData(prev => ({ ...prev, endDate: newEnd }));
+    }
+  };
 
   const handleSave = () => {
     updateTask(task.id, formData);
@@ -48,12 +75,13 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px] bg-background">
+      <DialogContent className="sm:max-w-[560px] bg-background max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-lg">Edit Task</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 mt-2">
+          {/* Title */}
           <div>
             <Label className="text-xs font-medium">Title</Label>
             <Input
@@ -63,6 +91,7 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
             />
           </div>
 
+          {/* Status & Priority */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="text-xs font-medium">Status</Label>
@@ -70,9 +99,7 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                 value={formData.status}
                 onValueChange={(v: TaskStatus) => setFormData({ ...formData, status: v })}
               >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">
                   {Object.entries(STATUS_CONFIG).map(([key, config]) => (
                     <SelectItem key={key} value={key}>{config.label}</SelectItem>
@@ -80,16 +107,13 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                 </SelectContent>
               </Select>
             </div>
-
             <div>
               <Label className="text-xs font-medium">Priority</Label>
               <Select
                 value={formData.priority}
                 onValueChange={(v: TaskPriority) => setFormData({ ...formData, priority: v })}
               >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">
                   {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
                     <SelectItem key={key} value={key}>{config.label}</SelectItem>
@@ -99,13 +123,14 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {/* Dates & Duration */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <Label className="text-xs font-medium">Start Date</Label>
+              <Label className="text-xs font-medium">Expected Start</Label>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal mt-1")}>
-                    <CalendarIcon className="mr-2 h-4 w-4" />
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal mt-1 text-xs")}>
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
                     {format(parseISO(formData.startDate), 'MMM dd, yyyy')}
                   </Button>
                 </PopoverTrigger>
@@ -113,19 +138,24 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                   <Calendar
                     mode="single"
                     selected={parseISO(formData.startDate)}
-                    onSelect={date => date && setFormData({ ...formData, startDate: format(date, 'yyyy-MM-dd') })}
+                    onSelect={date => {
+                      if (!date) return;
+                      const newStart = format(date, 'yyyy-MM-dd');
+                      const dur = differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate));
+                      const newEnd = format(addDays(date, Math.max(dur, 1)), 'yyyy-MM-dd');
+                      setFormData({ ...formData, startDate: newStart, endDate: newEnd });
+                    }}
                     className="pointer-events-auto"
                   />
                 </PopoverContent>
               </Popover>
             </div>
-
             <div>
-              <Label className="text-xs font-medium">End Date</Label>
+              <Label className="text-xs font-medium">Expected Finish</Label>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal mt-1")}>
-                    <CalendarIcon className="mr-2 h-4 w-4" />
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal mt-1 text-xs")}>
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
                     {format(parseISO(formData.endDate), 'MMM dd, yyyy')}
                   </Button>
                 </PopoverTrigger>
@@ -139,8 +169,19 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                 </PopoverContent>
               </Popover>
             </div>
+            <div>
+              <Label className="text-xs font-medium">Duration (days)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={durationInput}
+                onChange={e => handleDurationChange(e.target.value)}
+                className="mt-1 text-xs"
+              />
+            </div>
           </div>
 
+          {/* Costs */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="text-xs font-medium">Estimated Cost ($)</Label>
@@ -151,7 +192,6 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                 className="mt-1"
               />
             </div>
-
             <div>
               <Label className="text-xs font-medium">Actual Cost ($)</Label>
               <Input
@@ -163,24 +203,61 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
             </div>
           </div>
 
-          <div>
-            <Label className="text-xs font-medium">Depends On</Label>
-            <Select
-              value={formData.dependsOn || 'none'}
-              onValueChange={v => setFormData({ ...formData, dependsOn: v === 'none' ? null : v })}
-            >
-              <SelectTrigger className="mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover">
-                <SelectItem value="none">None</SelectItem>
-                {otherTasks.map(t => (
-                  <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Dependencies */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs font-medium">Depends On</Label>
+              <Select
+                value={formData.dependsOn || 'none'}
+                onValueChange={v => setFormData({ ...formData, dependsOn: v === 'none' ? null : v })}
+              >
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="none">None</SelectItem>
+                  {otherTasks.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs font-medium">Dependency Type</Label>
+              <Select
+                value={formData.dependencyType}
+                onValueChange={(v: DependencyType) => setFormData({ ...formData, dependencyType: v })}
+                disabled={!formData.dependsOn}
+              >
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {Object.entries(DEPENDENCY_LABELS).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
+          {/* Risk Flag Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-lg border">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className={cn("w-4 h-4", formData.flaggedAsRisk ? "text-destructive" : "text-muted-foreground")} />
+              <div>
+                <Label className="text-xs font-medium">Flag as Risk</Label>
+                <p className="text-[10px] text-muted-foreground">Adds task to Risk Registry</p>
+              </div>
+            </div>
+            <Switch
+              checked={formData.flaggedAsRisk}
+              onCheckedChange={checked => setFormData({
+                ...formData,
+                flaggedAsRisk: checked,
+                riskImpact: checked ? (formData.riskImpact || 3) : 1,
+                riskProbability: checked ? (formData.riskProbability || 3) : 1,
+              })}
+            />
+          </div>
+
+          {/* Risk Details */}
           {formData.flaggedAsRisk && (
             <div className="grid grid-cols-2 gap-4 p-3 rounded-lg bg-destructive/5 border border-destructive/10">
               <div>
@@ -189,9 +266,7 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                   value={String(formData.riskImpact)}
                   onValueChange={v => setFormData({ ...formData, riskImpact: Number(v) })}
                 >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-popover">
                     {[1, 2, 3, 4, 5].map(n => (
                       <SelectItem key={n} value={String(n)}>{n}</SelectItem>
@@ -199,16 +274,13 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
                   </SelectContent>
                 </Select>
               </div>
-
               <div>
                 <Label className="text-xs font-medium">Risk Probability (1-5)</Label>
                 <Select
                   value={String(formData.riskProbability)}
                   onValueChange={v => setFormData({ ...formData, riskProbability: Number(v) })}
                 >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-popover">
                     {[1, 2, 3, 4, 5].map(n => (
                       <SelectItem key={n} value={String(n)}>{n}</SelectItem>
@@ -219,6 +291,7 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
             </div>
           )}
 
+          {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSave}>Save Changes</Button>

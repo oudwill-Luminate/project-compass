@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Project, Bucket, Task, Owner } from '@/types/project';
+import { Project, Bucket, Task, Owner, DependencyType } from '@/types/project';
 import { useAuth } from '@/context/AuthContext';
 import { differenceInDays, parseISO, addDays, format } from 'date-fns';
 
@@ -31,6 +31,7 @@ interface TaskRow {
   estimated_cost: number;
   actual_cost: number;
   depends_on: string | null;
+  dependency_type: string;
   flagged_as_risk: boolean;
   risk_impact: number;
   risk_probability: number;
@@ -128,6 +129,7 @@ export function useProjectData(projectId: string | undefined) {
             estimatedCost: Number(t.estimated_cost),
             actualCost: Number(t.actual_cost),
             dependsOn: t.depends_on,
+            dependencyType: (t.dependency_type || 'FS') as DependencyType,
             flaggedAsRisk: t.flagged_as_risk,
             riskImpact: t.risk_impact,
             riskProbability: t.risk_probability,
@@ -183,6 +185,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.estimatedCost !== undefined) dbUpdates.estimated_cost = updates.estimatedCost;
     if (updates.actualCost !== undefined) dbUpdates.actual_cost = updates.actualCost;
     if (updates.dependsOn !== undefined) dbUpdates.depends_on = updates.dependsOn;
+    if (updates.dependencyType !== undefined) dbUpdates.dependency_type = updates.dependencyType;
     if (updates.flaggedAsRisk !== undefined) dbUpdates.flagged_as_risk = updates.flaggedAsRisk;
     if (updates.riskImpact !== undefined) dbUpdates.risk_impact = updates.riskImpact;
     if (updates.riskProbability !== undefined) dbUpdates.risk_probability = updates.riskProbability;
@@ -255,5 +258,9 @@ export function useProjectData(projectId: string | undefined) {
     });
   }, [user, project]);
 
-  return { project, members, loading, updateTask, updateContingency, addBucket, addTask, refetch: fetchAll, profiles, toOwner };
+  const moveTask = useCallback(async (taskId: string, newBucketId: string, newPosition: number) => {
+    await supabase.from('tasks').update({ bucket_id: newBucketId, position: newPosition }).eq('id', taskId);
+  }, []);
+
+  return { project, members, loading, updateTask, updateContingency, addBucket, addTask, moveTask, refetch: fetchAll, profiles, toOwner };
 }

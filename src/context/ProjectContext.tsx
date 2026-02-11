@@ -13,6 +13,7 @@ interface ProjectContextType {
   updateContingency: (percent: number) => void;
   addBucket: (name: string) => void;
   addTask: (bucketId: string, title: string) => void;
+  moveTask: (taskId: string, newBucketId: string, newPosition: number) => void;
   getAllTasks: () => Task[];
   getTaskById: (taskId: string) => Task | undefined;
   loading: boolean;
@@ -22,7 +23,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, addBucket: dbAddBucket, addTask: dbAddTask } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, addBucket: dbAddBucket, addTask: dbAddTask, moveTask: dbMoveTask } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -73,6 +74,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         updateContingency,
         addBucket: dbAddBucket,
         addTask: dbAddTask,
+        moveTask: dbMoveTask,
         getAllTasks,
         getTaskById,
         loading,
