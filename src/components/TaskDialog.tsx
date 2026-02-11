@@ -40,7 +40,7 @@ interface TaskDialogProps {
 }
 
 export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: TaskDialogProps) {
-  const { updateTask, getAllTasks } = useProject();
+  const { updateTask, getAllTasks, members } = useProject();
   const [formData, setFormData] = useState<Task>({ ...task });
 
   useEffect(() => {
@@ -128,6 +128,38 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* Owner */}
+          <div>
+            <Label className="text-xs font-medium">Owner</Label>
+            <Select
+              value={formData.owner?.id || 'unknown'}
+              onValueChange={(v) => {
+                const member = members.find(m => m.user_id === v);
+                if (member) {
+                  setFormData({
+                    ...formData,
+                    owner: { id: member.user_id, name: member.profile?.display_name || 'Unknown', color: '#0073EA' },
+                  });
+                } else {
+                  setFormData({
+                    ...formData,
+                    owner: { id: 'unknown', name: 'Unassigned', color: '#999' },
+                  });
+                }
+              }}
+            >
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="unknown">Unassigned</SelectItem>
+                {members.map(m => (
+                  <SelectItem key={m.user_id} value={m.user_id}>
+                    {m.profile?.display_name || 'Unknown'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Dates & Duration */}

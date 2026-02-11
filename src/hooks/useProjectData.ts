@@ -360,6 +360,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.bufferDays !== undefined) dbUpdates.buffer_days = updates.bufferDays;
     if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
     if (updates.responsible !== undefined) dbUpdates.responsible = updates.responsible;
+    if (updates.owner !== undefined) dbUpdates.owner_id = updates.owner.id === 'unknown' ? null : updates.owner.id;
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
