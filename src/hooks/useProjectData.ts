@@ -232,5 +232,28 @@ export function useProjectData(projectId: string | undefined) {
     await supabase.from('projects').update({ contingency_percent: percent }).eq('id', projectId);
   }, [projectId]);
 
-  return { project, members, loading, updateTask, updateContingency, refetch: fetchAll, profiles, toOwner };
+  const addBucket = useCallback(async (name: string) => {
+    if (!projectId) return;
+    const position = project?.buckets.length ?? 0;
+    const color = COLORS[position % COLORS.length];
+    await supabase.from('buckets').insert({ project_id: projectId, name, color, position });
+  }, [projectId, project]);
+
+  const addTask = useCallback(async (bucketId: string, title: string) => {
+    if (!user) return;
+    const bucket = project?.buckets.find(b => b.id === bucketId);
+    const position = bucket?.tasks.length ?? 0;
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const endDate = format(addDays(new Date(), 7), 'yyyy-MM-dd');
+    await supabase.from('tasks').insert({
+      bucket_id: bucketId,
+      title,
+      position,
+      owner_id: user.id,
+      start_date: today,
+      end_date: endDate,
+    });
+  }, [user, project]);
+
+  return { project, members, loading, updateTask, updateContingency, addBucket, addTask, refetch: fetchAll, profiles, toOwner };
 }

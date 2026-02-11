@@ -1,11 +1,38 @@
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
 import { TaskRow } from './TaskRow';
 import { format, parseISO } from 'date-fns';
 
+function InlineInput({ placeholder, onSubmit, onCancel }: { placeholder: string; onSubmit: (value: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && value.trim()) { onSubmit(value.trim()); setValue(''); }
+    if (e.key === 'Escape') onCancel();
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onKeyDown={handleKeyDown}
+      onBlur={onCancel}
+      placeholder={placeholder}
+      className="bg-transparent border-b border-primary/40 text-sm px-1 py-0.5 outline-none text-foreground placeholder:text-muted-foreground w-64"
+    />
+  );
+}
+
 export function TableView() {
-  const { project, toggleBucket } = useProject();
+  const { project, toggleBucket, addBucket, addTask } = useProject();
+  const [addingBucket, setAddingBucket] = useState(false);
+  const [addingTaskInBucket, setAddingTaskInBucket] = useState<string | null>(null);
 
   const totalEstimated = project.buckets.reduce(
     (sum, b) => sum + b.tasks.reduce((s, t) => s + t.estimatedCost, 0), 0
@@ -87,6 +114,25 @@ export function TableView() {
                         <TaskRow key={task.id} task={task} bucketColor={bucket.color} />
                       ))}
 
+                      {/* Add Task */}
+                      <div className="px-4 py-1.5" style={{ borderLeft: `4px solid ${bucket.color}` }}>
+                        {addingTaskInBucket === bucket.id ? (
+                          <InlineInput
+                            placeholder="Task name…"
+                            onSubmit={(name) => { addTask(bucket.id, name); setAddingTaskInBucket(null); }}
+                            onCancel={() => setAddingTaskInBucket(null)}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => setAddingTaskInBucket(bucket.id)}
+                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Task</span>
+                          </button>
+                        )}
+                      </div>
+
                       {/* Bucket Footer */}
                       <div
                         className="grid grid-cols-[1fr_140px_100px_100px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
@@ -112,7 +158,26 @@ export function TableView() {
           })}
         </div>
 
-        {/* Project Financial Summary */}
+        {/* Add Group */}
+        <div className="mt-3">
+          {addingBucket ? (
+            <div className="px-4 py-2">
+              <InlineInput
+                placeholder="Group name…"
+                onSubmit={(name) => { addBucket(name); setAddingBucket(false); }}
+                onCancel={() => setAddingBucket(false)}
+              />
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingBucket(true)}
+              className="flex items-center gap-1.5 px-4 py-2.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Group</span>
+            </button>
+          )}
+        </div>
         <div className="mt-6 rounded-xl border bg-muted/20 p-5">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
             Project Financial Summary
