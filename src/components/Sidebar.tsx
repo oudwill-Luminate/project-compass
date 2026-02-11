@@ -1,4 +1,4 @@
-import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft } from 'lucide-react';
+import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/context/ProjectContext';
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { id: 'table' as const, label: 'Table View', icon: LayoutGrid },
   { id: 'timeline' as const, label: 'Timeline', icon: GanttChart },
+  { id: 'workload' as const, label: 'Workload', icon: Users },
   { id: 'risk' as const, label: 'Risk Registry', icon: AlertTriangle },
   { id: 'settings' as const, label: 'Settings', icon: Settings },
 ];

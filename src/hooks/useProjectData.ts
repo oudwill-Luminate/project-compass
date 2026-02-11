@@ -45,6 +45,7 @@ interface TaskRow {
   responsible: string | null;
   progress: number;
   risk_description: string;
+  effort_hours: number;
   baseline_start_date: string | null;
   baseline_end_date: string | null;
 }
@@ -82,6 +83,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       bufferPosition: (t.buffer_position === 'start' ? 'start' : 'end') as 'start' | 'end',
       responsible: t.responsible || null,
       progress: t.progress || 0,
+      effortHours: Number(t.effort_hours) || 0,
       baselineStartDate: t.baseline_start_date || null,
       baselineEndDate: t.baseline_end_date || null,
       subTasks: [],
@@ -438,6 +440,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
     if (updates.responsible !== undefined) dbUpdates.responsible = updates.responsible;
     if (updates.progress !== undefined) dbUpdates.progress = updates.progress;
+    if (updates.effortHours !== undefined) dbUpdates.effort_hours = updates.effortHours;
     if (updates.baselineStartDate !== undefined) dbUpdates.baseline_start_date = updates.baselineStartDate;
     if (updates.baselineEndDate !== undefined) dbUpdates.baseline_end_date = updates.baselineEndDate;
     if (updates.owner !== undefined) dbUpdates.owner_id = updates.owner.id === 'unknown' ? null : updates.owner.id;
@@ -590,6 +593,7 @@ export function useProjectData(projectId: string | undefined) {
       bufferPosition: 'end',
       responsible: null,
       progress: 0,
+      effortHours: 0,
       riskImpact: 1,
       riskProbability: 1,
       riskDescription: '',

@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { TableView } from '@/components/TableView';
 import { TimelineView } from '@/components/TimelineView';
 import { RiskRegistry } from '@/components/RiskRegistry';
+import { WorkloadView } from '@/components/WorkloadView';
 import { ProjectSettings } from '@/components/ProjectSettings';
 import { Loader2 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ function ProjectContent() {
       >
         {activeView === 'table' && <TableView />}
         {activeView === 'timeline' && <TimelineView />}
+        {activeView === 'workload' && <WorkloadView />}
         {activeView === 'risk' && <RiskRegistry />}
         {activeView === 'settings' && <ProjectSettings />}
       </motion.div>

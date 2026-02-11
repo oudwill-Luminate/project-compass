@@ -240,6 +240,7 @@ export type Database = {
           created_at: string
           dependency_type: Database["public"]["Enums"]["dependency_type"]
           depends_on: string | null
+          effort_hours: number
           end_date: string
           estimated_cost: number
           flagged_as_risk: boolean
@@ -268,6 +269,7 @@ export type Database = {
           created_at?: string
           dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
+          effort_hours?: number
           end_date?: string
           estimated_cost?: number
           flagged_as_risk?: boolean
@@ -296,6 +298,7 @@ export type Database = {
           created_at?: string
           dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
+          effort_hours?: number
           end_date?: string
           estimated_cost?: number
           flagged_as_risk?: boolean

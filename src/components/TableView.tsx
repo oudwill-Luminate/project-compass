@@ -93,6 +93,7 @@ export function TableView() {
     parentTaskId: null,
     responsible: null,
     progress: 0,
+    effortHours: 0,
     baselineStartDate: null,
     baselineEndDate: null,
     subTasks: [],

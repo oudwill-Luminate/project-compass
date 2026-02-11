@@ -29,6 +29,7 @@ export interface Task {
   bufferPosition: 'start' | 'end';
   responsible: string | null;
   progress: number; // 0-100
+  effortHours: number;
   baselineStartDate: string | null;
   baselineEndDate: string | null;
   subTasks: Task[];
