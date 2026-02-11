@@ -1,4 +1,4 @@
-import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft, Users } from 'lucide-react';
+import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft, Users, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/context/ProjectContext';
@@ -63,6 +63,19 @@ export function Sidebar() {
             )}
           </button>
         ))}
+
+        <button
+          onClick={() => {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-all mt-3"
+        >
+          <Search className="w-[18px] h-[18px]" />
+          <span>Search Tasks</span>
+          <kbd className="ml-auto text-[10px] font-mono bg-sidebar-accent/60 text-sidebar-foreground/50 px-1.5 py-0.5 rounded">
+            ⌘K
+          </kbd>
+        </button>
       </nav>
 
       <div className="p-4 border-t border-sidebar-border">
