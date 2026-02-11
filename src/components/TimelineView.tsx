@@ -6,7 +6,7 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { ChevronRight, ChevronDown, Shield } from 'lucide-react';
+import { ChevronRight, ChevronDown, Shield, AlertTriangle } from 'lucide-react';
 import { Task, STATUS_CONFIG } from '@/types/project';
 
 function TaskTimelineRow({
@@ -28,6 +28,7 @@ function TaskTimelineRow({
 }) {
   const [expanded, setExpanded] = useState(true);
   const hasSubTasks = task.subTasks.length > 0;
+  const isHighRisk = task.flaggedAsRisk && task.riskImpact >= 4;
 
   // Roll-up dates for parents (including children's buffers)
   let displayStart = task.startDate;
@@ -57,7 +58,7 @@ function TaskTimelineRow({
 
   return (
     <>
-      <div className="flex items-center border-b hover:bg-muted/20 transition-colors">
+      <div className={`flex items-center border-b hover:bg-muted/20 transition-colors ${isHighRisk ? 'bg-destructive/[0.04]' : ''}`}>
         <div
           className="w-[260px] shrink-0 px-4 py-3 flex items-center gap-1.5 border-r"
           style={{ paddingLeft: `${16 + depth * 20}px` }}
@@ -73,6 +74,12 @@ function TaskTimelineRow({
           <span className={`text-sm text-foreground truncate ${hasSubTasks ? 'font-medium' : ''}`}>
             {task.title}
           </span>
+          {isHighRisk && (
+            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide text-destructive-foreground bg-destructive px-1.5 py-0.5 rounded-full shrink-0 animate-pulse">
+              <AlertTriangle className="w-2.5 h-2.5" />
+              Risk
+            </span>
+          )}
           {hasSubTasks && (
             <span className="text-[10px] text-muted-foreground shrink-0">({task.subTasks.length})</span>
           )}
@@ -102,7 +109,7 @@ function TaskTimelineRow({
               : statusColor;
             return (
               <div
-                className={`absolute top-2.5 h-7 rounded-md shadow-sm cursor-pointer hover:shadow-md hover:brightness-110 transition-all ${hasSubTasks ? 'opacity-60 border-2 border-white/30' : ''}`}
+                className={`absolute top-2.5 h-7 rounded-md shadow-sm cursor-pointer hover:shadow-md hover:brightness-110 transition-all ${hasSubTasks ? 'opacity-60 border-2 border-white/30' : ''} ${isHighRisk ? 'ring-2 ring-destructive/60 ring-offset-1' : ''}`}
                 style={{
                   left: pos.left,
                   width: pos.width,
