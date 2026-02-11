@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   format, parseISO, differenceInDays, addDays,
   startOfWeek, endOfWeek, eachWeekOfInterval,
@@ -6,6 +6,7 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
+import { ChevronRight, ChevronDown } from 'lucide-react';
 import { Task, STATUS_CONFIG } from '@/types/project';
 
 function TaskTimelineRow({
@@ -25,6 +26,7 @@ function TaskTimelineRow({
   todayPercent: number;
   getTaskPosition: (s: string, e: string) => { left: string; width: string };
 }) {
+  const [expanded, setExpanded] = useState(true);
   const hasSubTasks = task.subTasks.length > 0;
 
   // Roll-up dates for parents
@@ -48,9 +50,16 @@ function TaskTimelineRow({
     <>
       <div className="flex items-center border-b hover:bg-muted/20 transition-colors">
         <div
-          className="w-[260px] shrink-0 px-4 py-3 flex items-center gap-2.5 border-r"
+          className="w-[260px] shrink-0 px-4 py-3 flex items-center gap-1.5 border-r"
           style={{ paddingLeft: `${16 + depth * 20}px` }}
         >
+          {hasSubTasks ? (
+            <button onClick={() => setExpanded(!expanded)} className="shrink-0 p-0.5 hover:bg-muted rounded">
+              {expanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
+            </button>
+          ) : (
+            <span className="w-[18px] shrink-0" />
+          )}
           <OwnerAvatar owner={task.owner} />
           <span className={`text-sm text-foreground truncate ${hasSubTasks ? 'font-medium' : ''}`}>
             {task.title}
@@ -98,7 +107,7 @@ function TaskTimelineRow({
         </div>
       </div>
       {/* Render sub-tasks */}
-      {hasSubTasks && task.subTasks.map(sub => (
+      {expanded && hasSubTasks && task.subTasks.map(sub => (
         <TaskTimelineRow
           key={sub.id}
           task={sub}
