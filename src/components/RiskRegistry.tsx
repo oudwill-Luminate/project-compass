@@ -1,7 +1,11 @@
+import { useState } from 'react';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
-import { AlertTriangle, ShieldAlert } from 'lucide-react';
+import { TaskDialog } from './TaskDialog';
+import { Task } from '@/types/project';
+import { AlertTriangle, ShieldAlert, ChevronDown, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const RISK_LABELS = {
   impact: ['', 'Negligible', 'Minor', 'Moderate', 'Major', 'Severe'],
@@ -26,8 +30,9 @@ function getRiskCellBg(impact: number, probability: number): string {
 
 export function RiskRegistry() {
   const { project, updateTask } = useProject();
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
 
-  // Recursively flatten all tasks including subtasks
   function flattenAllTasks(tasks: typeof project.buckets[0]['tasks']): typeof project.buckets[0]['tasks'] {
     const result: typeof project.buckets[0]['tasks'] = [];
     for (const t of tasks) {
@@ -45,7 +50,6 @@ export function RiskRegistry() {
       .map(t => ({ ...t, bucketName: b.name, bucketColor: b.color }))
   );
 
-  // Build matrix data
   const matrixCells: Record<string, typeof flaggedTasks> = {};
   for (let i = 1; i <= 5; i++) {
     for (let p = 1; p <= 5; p++) {
@@ -56,6 +60,15 @@ export function RiskRegistry() {
     const key = `${t.riskImpact}-${t.riskProbability}`;
     matrixCells[key]?.push(t);
   });
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="flex-1 overflow-auto">
@@ -75,7 +88,6 @@ export function RiskRegistry() {
           <h2 className="text-sm font-bold text-foreground mb-4">Impact / Probability Matrix</h2>
           <div className="inline-block">
             <div className="flex items-stretch">
-              {/* Y-axis label */}
               <div className="w-8 flex items-center justify-center">
                 <span className="text-[11px] text-muted-foreground font-semibold -rotate-90 whitespace-nowrap tracking-wider">
                   IMPACT →
@@ -83,7 +95,6 @@ export function RiskRegistry() {
               </div>
 
               <div>
-                {/* Matrix rows: Impact 5 (top) to 1 (bottom) */}
                 {[5, 4, 3, 2, 1].map(impact => (
                   <div key={impact} className="flex items-center">
                     <div className="w-20 pr-2 text-right">
@@ -105,6 +116,7 @@ export function RiskRegistry() {
                               className="w-5 h-5 rounded-full border-2 border-background shadow-sm cursor-pointer hover:scale-125 transition-transform"
                               style={{ backgroundColor: t.bucketColor }}
                               title={`${t.title} (${t.bucketName})`}
+                              onClick={() => setEditingTask(t)}
                             />
                           ))}
                         </div>
@@ -113,7 +125,6 @@ export function RiskRegistry() {
                   </div>
                 ))}
 
-                {/* X-axis labels */}
                 <div className="flex ml-20 mt-1">
                   {[1, 2, 3, 4, 5].map(prob => (
                     <div key={prob} className="w-[72px] text-center">
@@ -149,45 +160,88 @@ export function RiskRegistry() {
             <div className="space-y-2">
               {flaggedTasks.map(task => {
                 const risk = getRiskLevel(task.riskImpact, task.riskProbability);
+                const isExpanded = expandedIds.has(task.id);
+                const hasDescription = !!task.riskDescription?.trim();
+
                 return (
                   <div
                     key={task.id}
-                    className="flex items-center gap-4 p-4 rounded-xl border hover:bg-muted/30 transition-colors"
+                    className="rounded-xl border hover:bg-muted/30 transition-colors"
                   >
-                    <div
-                      className="w-3 h-3 rounded-full shrink-0"
-                      style={{ backgroundColor: risk.cssColor }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm text-foreground">{task.title}</span>
-                        <span
-                          className="text-[11px] px-2 py-0.5 rounded-full font-medium"
-                          style={{
-                            backgroundColor: task.bucketColor + '18',
-                            color: task.bucketColor,
-                          }}
-                        >
-                          {task.bucketName}
-                        </span>
+                    <div className="flex items-center gap-4 p-4">
+                      {/* Expand toggle */}
+                      <button
+                        onClick={() => hasDescription && toggleExpanded(task.id)}
+                        className={cn(
+                          "shrink-0 transition-transform",
+                          hasDescription ? "cursor-pointer text-muted-foreground hover:text-foreground" : "text-transparent cursor-default"
+                        )}
+                        disabled={!hasDescription}
+                      >
+                        <ChevronDown className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-180")} />
+                      </button>
+
+                      <div
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: risk.cssColor }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm text-foreground">{task.title}</span>
+                          <span
+                            className="text-[11px] px-2 py-0.5 rounded-full font-medium"
+                            style={{
+                              backgroundColor: task.bucketColor + '18',
+                              color: task.bucketColor,
+                            }}
+                          >
+                            {task.bucketName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                          <span>Impact: <strong>{RISK_LABELS.impact[task.riskImpact]}</strong></span>
+                          <span className="opacity-30">•</span>
+                          <span>Prob: <strong>{RISK_LABELS.probability[task.riskProbability]}</strong></span>
+                          <span className="opacity-30">•</span>
+                          <span className="font-bold" style={{ color: risk.cssColor }}>
+                            {risk.label} Risk
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                        <span>Impact: <strong>{RISK_LABELS.impact[task.riskImpact]}</strong></span>
-                        <span className="opacity-30">•</span>
-                        <span>Prob: <strong>{RISK_LABELS.probability[task.riskProbability]}</strong></span>
-                        <span className="opacity-30">•</span>
-                        <span className="font-bold" style={{ color: risk.cssColor }}>
-                          {risk.label} Risk
-                        </span>
-                      </div>
+                      <OwnerAvatar owner={task.owner} />
+                      <button
+                        onClick={() => setEditingTask(task)}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium px-2 py-1 rounded hover:bg-accent"
+                        title="Edit risk"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => updateTask(task.id, { flaggedAsRisk: false, riskImpact: 1, riskProbability: 1, riskDescription: '' })}
+                        className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium px-2 py-1 rounded hover:bg-destructive/10"
+                      >
+                        Remove
+                      </button>
                     </div>
-                    <OwnerAvatar owner={task.owner} />
-                    <button
-                      onClick={() => updateTask(task.id, { flaggedAsRisk: false, riskImpact: 1, riskProbability: 1 })}
-                      className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium px-2 py-1 rounded hover:bg-destructive/10"
-                    >
-                      Remove
-                    </button>
+
+                    {/* Collapsible description */}
+                    <AnimatePresence>
+                      {isExpanded && hasDescription && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-4 pb-4 pl-[4.25rem]">
+                            <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap bg-muted/30 rounded-lg p-3 border border-border/40">
+                              {task.riskDescription}
+                            </p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 );
               })}
@@ -195,6 +249,15 @@ export function RiskRegistry() {
           )}
         </div>
       </div>
+
+      {/* Edit task dialog */}
+      {editingTask && (
+        <TaskDialog
+          task={editingTask}
+          open={!!editingTask}
+          onOpenChange={open => { if (!open) setEditingTask(null); }}
+        />
+      )}
     </div>
   );
 }
