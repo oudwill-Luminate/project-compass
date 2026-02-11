@@ -14,6 +14,7 @@ interface ProjectContextType {
   addBucket: (name: string) => void;
   updateBucket: (bucketId: string, updates: { name?: string; color?: string; description?: string; owner_id?: string | null }) => void;
   deleteBucket: (bucketId: string) => void;
+  moveBucket: (bucketId: string, newPosition: number) => void;
   addTask: (bucketId: string, title: string, parentTaskId?: string) => void;
   createTaskFull: (bucketId: string, taskData: Omit<Task, 'id' | 'subTasks'>) => void;
   moveTask: (taskId: string, newBucketId: string, newPosition: number) => void;
@@ -27,7 +28,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -79,6 +80,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         addBucket: dbAddBucket,
         updateBucket: dbUpdateBucket,
         deleteBucket: dbDeleteBucket,
+        moveBucket: dbMoveBucket,
         addTask: dbAddTask,
         createTaskFull: dbCreateTaskFull,
         moveTask: dbMoveTask,

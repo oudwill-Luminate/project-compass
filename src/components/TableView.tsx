@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight, Plus, MoreHorizontal, Pencil, Trash2, Settings2, Eye, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
@@ -46,7 +46,7 @@ function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { p
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, addTask, createTaskFull, moveTask, deleteTask, members } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
   const [editDialogBucketId, setEditDialogBucketId] = useState<string | null>(null);
@@ -103,9 +103,17 @@ export function TableView() {
 
   const handleDragEnd = useCallback((result: DropResult) => {
     if (!result.destination) return;
-    const { draggableId, destination } = result;
+    const { draggableId, source, destination, type } = result;
+    
+    if (type === 'BUCKET') {
+      if (source.index !== destination.index) {
+        moveBucket(draggableId, destination.index);
+      }
+      return;
+    }
+    
     moveTask(draggableId, destination.droppableId, destination.index);
-  }, [moveTask]);
+  }, [moveTask, moveBucket]);
 
   return (
     <div className="flex-1 overflow-auto">
@@ -166,8 +174,14 @@ export function TableView() {
 
         {/* Buckets with DnD */}
         <DragDropContext onDragEnd={handleDragEnd}>
-          <div className="space-y-3 mt-3">
-            {project.buckets.map(bucket => {
+          <Droppable droppableId="buckets-list" type="BUCKET">
+            {(bucketsProvided) => (
+              <div
+                ref={bucketsProvided.innerRef}
+                {...bucketsProvided.droppableProps}
+                className="space-y-3 mt-3"
+              >
+                {project.buckets.map((bucket, bucketIndex) => {
               const allBucketTasks = flattenTasks(bucket.tasks);
               const bucketEstimated = allBucketTasks.reduce((s, t) => s + t.estimatedCost, 0);
               const bucketActual = allBucketTasks.reduce((s, t) => s + t.actualCost, 0);
@@ -175,7 +189,6 @@ export function TableView() {
               const bucketStart = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
               const bucketEnd = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
 
-              // Build subtotal cells dynamically
               const subtotalCells = visibleCols.map(col => {
                 if (col.id === 'task') return <span key={col.id} className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">Subtotal</span>;
                 if (col.id === 'estCost') return <span key={col.id} className="text-right font-bold tabular-nums">${bucketEstimated.toLocaleString()}</span>;
@@ -184,12 +197,23 @@ export function TableView() {
               });
 
               return (
-                <div key={bucket.id} className="rounded-xl border overflow-visible shadow-sm">
+                <Draggable key={bucket.id} draggableId={bucket.id} index={bucketIndex}>
+                  {(bucketDragProvided, bucketDragSnapshot) => (
+                    <div
+                      ref={bucketDragProvided.innerRef}
+                      {...bucketDragProvided.draggableProps}
+                      className={cn("rounded-xl border overflow-visible shadow-sm", bucketDragSnapshot.isDragging && "shadow-lg ring-2 ring-primary/20")}
+                    >
                   {/* Bucket Header */}
                   <div
                     className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                     style={{ borderLeft: `4px solid ${bucket.color}` }}
                   >
+                    {/* Drag handle for bucket */}
+                    <div {...bucketDragProvided.dragHandleProps} className="shrink-0 cursor-grab active:cursor-grabbing">
+                      <GripVertical className="w-4 h-4 text-muted-foreground/50" />
+                    </div>
+
                     <button onClick={() => toggleBucket(bucket.id)} className="shrink-0">
                       {bucket.collapsed ? (
                         <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -279,7 +303,7 @@ export function TableView() {
                         transition={{ duration: 0.2, ease: 'easeInOut' }}
                         className="overflow-hidden"
                       >
-                        <Droppable droppableId={bucket.id}>
+                        <Droppable droppableId={bucket.id} type="TASK">
                           {(provided, snapshot) => (
                             <div
                               ref={provided.innerRef}
@@ -332,10 +356,15 @@ export function TableView() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                </div>
+                    </div>
+                  )}
+                </Draggable>
               );
             })}
-          </div>
+                {bucketsProvided.placeholder}
+              </div>
+            )}
+          </Droppable>
         </DragDropContext>
         </div>
         </div>
