@@ -6,6 +6,7 @@ import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
 import { TaskDialog } from './TaskDialog';
 import { cn } from '@/lib/utils';
+import { calcMinWidth } from './tableColumns';
 import type { DraggableProvidedDragHandleProps } from '@hello-pangea/dnd';
 import {
   DropdownMenu,
@@ -294,7 +295,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
           "grid gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm",
           hasSubTasks && "font-medium bg-muted/10"
         )}
-        style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucketColor}15`, paddingLeft: `${16 + indent}px`, minWidth: '900px' }}
+        style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucketColor}15`, paddingLeft: `${16 + indent}px`, minWidth: calcMinWidth(visibleColumnIds) }}
       >
         {cells}
       </div>
