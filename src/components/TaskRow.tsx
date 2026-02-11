@@ -83,6 +83,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
   const [subTaskTitle, setSubTaskTitle] = useState('');
 
   const hasSubTasks = task.subTasks.length > 0;
+  const isHighRisk = task.flaggedAsRisk && task.riskImpact >= 4;
   const rolled = getRolledUp(task);
 
   const statusConfig = STATUS_CONFIG[rolled.status];
@@ -162,8 +163,14 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
             <Link className="w-3 h-3" />
           </span>
         )}
-        {task.flaggedAsRisk && (
+        {task.flaggedAsRisk && !isHighRisk && (
           <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
+        )}
+        {isHighRisk && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-destructive-foreground bg-destructive px-1.5 py-0.5 rounded-full shrink-0 animate-pulse">
+            <AlertTriangle className="w-3 h-3" />
+            High Risk
+          </span>
         )}
       </div>
     );
@@ -309,11 +316,12 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
         className={cn(
           "group grid gap-0 px-4 py-2.5 border-t transition-all duration-200 items-center text-sm",
           "hover:bg-primary/[0.03] hover:shadow-[inset_3px_0_0_0_var(--glow-color)]",
-          hasSubTasks && "font-medium bg-muted/10"
+          hasSubTasks && "font-medium bg-muted/10",
+          isHighRisk && "animate-[pulse-risk_2s_ease-in-out_infinite] bg-destructive/[0.04]"
         )}
         style={{
           gridTemplateColumns: gridCols,
-          borderLeft: `4px solid ${bucketColor}15`,
+          borderLeft: isHighRisk ? `4px solid hsl(var(--destructive))` : `4px solid ${bucketColor}15`,
           paddingLeft: `${16 + indent}px`,
           '--glow-color': bucketColor,
         } as React.CSSProperties}
