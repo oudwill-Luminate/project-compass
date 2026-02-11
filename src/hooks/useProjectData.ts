@@ -458,6 +458,41 @@ export function useProjectData(projectId: string | undefined) {
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
+    // Activity logging for tracked fields
+    if (projectId && user) {
+      const displayName = profiles[user.id]?.display_name || 'Someone';
+      const logs: { project_id: string; task_id: string; user_id: string; description: string }[] = [];
+
+      if (updates.endDate !== undefined && updates.endDate !== oldTask.endDate) {
+        logs.push({
+          project_id: projectId,
+          task_id: taskId,
+          user_id: user.id,
+          description: `${displayName} moved Deadline from ${oldTask.endDate} to ${updates.endDate} on task "${oldTask.title}"`,
+        });
+      }
+      if (updates.estimatedCost !== undefined && updates.estimatedCost !== oldTask.estimatedCost) {
+        logs.push({
+          project_id: projectId,
+          task_id: taskId,
+          user_id: user.id,
+          description: `${displayName} changed Estimated Cost from $${oldTask.estimatedCost} to $${updates.estimatedCost} on task "${oldTask.title}"`,
+        });
+      }
+      if (updates.status !== undefined && updates.status !== oldTask.status) {
+        logs.push({
+          project_id: projectId,
+          task_id: taskId,
+          user_id: user.id,
+          description: `${displayName} changed Status from '${oldTask.status}' to '${updates.status}' on task "${oldTask.title}"`,
+        });
+      }
+
+      if (logs.length > 0) {
+        await supabase.from('activity_log').insert(logs);
+      }
+    }
+
     // Only cascade if dates actually changed
     const updatedTask = { ...oldTask, ...updates };
     const datesChanged =

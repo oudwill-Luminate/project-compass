@@ -10,6 +10,7 @@ import { WorkloadView } from '@/components/WorkloadView';
 import { ProjectSettings } from '@/components/ProjectSettings';
 import { ProjectOverview } from '@/components/ProjectOverview';
 import { StakeholdersView } from '@/components/StakeholdersView';
+import { ProjectActivity } from '@/components/ProjectActivity';
 import { TaskSearchCommand } from '@/components/TaskSearchCommand';
 import { Loader2 } from 'lucide-react';
 
@@ -40,6 +41,7 @@ function ProjectContent() {
         {activeView === 'workload' && <WorkloadView />}
         {activeView === 'stakeholders' && <StakeholdersView />}
         {activeView === 'risk' && <RiskRegistry />}
+        {activeView === 'activity' && <ProjectActivity />}
         {activeView === 'settings' && <ProjectSettings />}
       </motion.div>
     </AnimatePresence>

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Project, Task, ProjectGoal } from '@/types/project';
 import { useProjectData, flattenTasks } from '@/hooks/useProjectData';
 
-type ViewType = 'overview' | 'table' | 'timeline' | 'risk' | 'workload' | 'stakeholders' | 'settings';
+type ViewType = 'overview' | 'table' | 'timeline' | 'risk' | 'workload' | 'stakeholders' | 'activity' | 'settings';
 
 interface ProjectContextType {
   project: Project;
