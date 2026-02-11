@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link, GripVertical } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2 } from 'lucide-react';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
@@ -21,7 +21,7 @@ interface TaskRowProps {
 }
 
 export function TaskRow({ task, bucketColor, dragHandleProps }: TaskRowProps) {
-  const { updateTask, getTaskById } = useProject();
+  const { updateTask, deleteTask, getTaskById } = useProject();
   const [editOpen, setEditOpen] = useState(false);
 
   const statusConfig = STATUS_CONFIG[task.status];
@@ -134,6 +134,13 @@ export function TaskRow({ task, bucketColor, dragHandleProps }: TaskRowProps) {
                 }}
               >
                 {task.flaggedAsRisk ? 'Remove Risk Flag' : 'Flag as Risk'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => { if (confirm(`Delete "${task.title}"?`)) deleteTask(task.id); }}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-2" />
+                Delete Task
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -239,8 +239,21 @@ export function useProjectData(projectId: string | undefined) {
     if (!projectId) return;
     const position = project?.buckets.length ?? 0;
     const color = COLORS[position % COLORS.length];
-    await supabase.from('buckets').insert({ project_id: projectId, name, color, position });
+    const { error } = await supabase.from('buckets').insert({ project_id: projectId, name, color, position });
+    if (error) console.error('addBucket error:', error);
   }, [projectId, project]);
+
+  const updateBucket = useCallback(async (bucketId: string, updates: { name?: string; color?: string }) => {
+    const { error } = await supabase.from('buckets').update(updates).eq('id', bucketId);
+    if (error) console.error('updateBucket error:', error);
+  }, []);
+
+  const deleteBucket = useCallback(async (bucketId: string) => {
+    // Delete all tasks in the bucket first
+    await supabase.from('tasks').delete().eq('bucket_id', bucketId);
+    const { error } = await supabase.from('buckets').delete().eq('id', bucketId);
+    if (error) console.error('deleteBucket error:', error);
+  }, []);
 
   const addTask = useCallback(async (bucketId: string, title: string) => {
     if (!user) return;
@@ -259,8 +272,15 @@ export function useProjectData(projectId: string | undefined) {
   }, [user, project]);
 
   const moveTask = useCallback(async (taskId: string, newBucketId: string, newPosition: number) => {
-    await supabase.from('tasks').update({ bucket_id: newBucketId, position: newPosition }).eq('id', taskId);
+    const { error } = await supabase.from('tasks').update({ bucket_id: newBucketId, position: newPosition }).eq('id', taskId);
+    if (error) console.error('moveTask error:', error);
+    else await fetchAll(); // Force refresh after move
+  }, [fetchAll]);
+
+  const deleteTask = useCallback(async (taskId: string) => {
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+    if (error) console.error('deleteTask error:', error);
   }, []);
 
-  return { project, members, loading, updateTask, updateContingency, addBucket, addTask, moveTask, refetch: fetchAll, profiles, toOwner };
+  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, addTask, moveTask, deleteTask, refetch: fetchAll, profiles, toOwner };
 }
