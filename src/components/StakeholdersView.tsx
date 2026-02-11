@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -28,10 +29,11 @@ import {
 } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Plus, Trash2, Users2, MessageSquare, CalendarIcon, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Users2, MessageSquare, CalendarIcon, AlertTriangle, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { format, differenceInDays, parseISO } from 'date-fns';
+import { format, differenceInDays, parseISO, subDays } from 'date-fns';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 type EngagementLevel = 'unaware' | 'resistant' | 'neutral' | 'supportive' | 'leading';
 type Sentiment = 'positive' | 'neutral' | 'negative';
@@ -57,6 +59,13 @@ interface CommunicationLog {
   loggedAt: string;
 }
 
+interface SentimentHistoryPoint {
+  date: string;
+  positive: number;
+  neutral: number;
+  negative: number;
+}
+
 const ENGAGEMENT_CONFIG: Record<EngagementLevel, { label: string; className: string }> = {
   unaware: { label: 'Unaware', className: 'bg-muted text-muted-foreground' },
   resistant: { label: 'Resistant', className: 'bg-destructive/15 text-destructive' },
@@ -70,6 +79,15 @@ const SENTIMENT_CONFIG: Record<Sentiment, { label: string; border: string; dot: 
   neutral: { label: 'Neutral', border: 'ring-2 ring-muted-foreground/30', dot: 'bg-muted-foreground' },
   negative: { label: 'Negative', border: 'ring-2 ring-red-500', dot: 'bg-red-500' },
 };
+
+const SENTIMENT_NUMERIC: Record<string, number> = { positive: 1, neutral: 0, negative: -1 };
+
+/* ── Helper: overdue check ── */
+function isOverdue(s: Stakeholder): boolean {
+  if (s.power < 4) return false;
+  if (!s.lastCommunicationDate) return true;
+  return differenceInDays(new Date(), parseISO(s.lastCommunicationDate)) > 14;
+}
 
 /* ── Matrix ── */
 function PowerInterestMatrix({ stakeholders }: { stakeholders: Stakeholder[] }) {
@@ -129,11 +147,102 @@ function PowerInterestMatrix({ stakeholders }: { stakeholders: Stakeholder[] }) 
   );
 }
 
-/* ── Helper: overdue check (high power, >14 days since last communication) ── */
-function isOverdue(s: Stakeholder): boolean {
-  if (s.power < 4) return false;
-  if (!s.lastCommunicationDate) return true; // never communicated = overdue
-  return differenceInDays(new Date(), parseISO(s.lastCommunicationDate)) > 14;
+/* ── Sentiment History Chart ── */
+function SentimentHistoryChart({ projectId }: { projectId: string }) {
+  const [chartData, setChartData] = useState<SentimentHistoryPoint[]>([]);
+
+  useEffect(() => {
+    async function fetchHistory() {
+      const { data } = await supabase
+        .from('stakeholder_sentiment_history' as any)
+        .select('sentiment, recorded_at, stakeholder_id')
+        .order('recorded_at');
+
+      if (!data || data.length === 0) {
+        setChartData([]);
+        return;
+      }
+
+      // Filter to stakeholders belonging to this project
+      const { data: projectStakeholders } = await supabase
+        .from('stakeholders' as any)
+        .select('id')
+        .eq('project_id', projectId);
+
+      const projectIds = new Set((projectStakeholders as any[] || []).map((s: any) => s.id));
+      const filtered = (data as any[]).filter(d => projectIds.has(d.stakeholder_id));
+
+      // Group by date
+      const byDate = new Map<string, { positive: number; neutral: number; negative: number }>();
+      for (const entry of filtered) {
+        const date = entry.recorded_at;
+        if (!byDate.has(date)) byDate.set(date, { positive: 0, neutral: 0, negative: 0 });
+        const bucket = byDate.get(date)!;
+        const s = entry.sentiment as Sentiment;
+        if (s === 'positive') bucket.positive++;
+        else if (s === 'negative') bucket.negative++;
+        else bucket.neutral++;
+      }
+
+      const points = Array.from(byDate.entries())
+        .map(([date, counts]) => ({ date, ...counts }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      setChartData(points);
+    }
+    fetchHistory();
+  }, [projectId]);
+
+  if (chartData.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-primary" />
+            Sentiment Trends
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground text-center py-6">
+            No sentiment history yet. Change stakeholder sentiments to start tracking trends.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-primary" />
+          Sentiment Trends
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-[200px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10 }}
+                tickFormatter={v => format(parseISO(v), 'MMM d')}
+              />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip
+                labelFormatter={v => format(parseISO(v as string), 'PPP')}
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+              />
+              <Line type="monotone" dataKey="positive" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Positive" />
+              <Line type="monotone" dataKey="neutral" stroke="#9ca3af" strokeWidth={2} dot={{ r: 3 }} name="Neutral" />
+              <Line type="monotone" dataKey="negative" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="Negative" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 /* ── Communication Log Dialog ── */
@@ -179,7 +288,6 @@ function CommLogDialog({
       note: newNote.trim(),
       logged_at: now,
     } as any);
-    // Also update last_communication_date on the stakeholder
     await supabase
       .from('stakeholders' as any)
       .update({ last_communication_date: now.slice(0, 10) } as any)
@@ -201,8 +309,6 @@ function CommLogDialog({
         <DialogHeader>
           <DialogTitle className="text-base">Communication Log — {stakeholder.name}</DialogTitle>
         </DialogHeader>
-
-        {/* Add entry */}
         <div className="flex gap-2">
           <Textarea
             value={newNote}
@@ -214,8 +320,6 @@ function CommLogDialog({
             Add
           </Button>
         </div>
-
-        {/* Entries */}
         <div className="flex-1 overflow-auto space-y-2 mt-2">
           {logs.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">No entries yet.</p>
@@ -248,6 +352,7 @@ export function StakeholdersView() {
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [loading, setLoading] = useState(true);
   const [logDialogStakeholder, setLogDialogStakeholder] = useState<Stakeholder | null>(null);
+  const [chartKey, setChartKey] = useState(0); // force chart refresh
 
   const fetchStakeholders = useCallback(async () => {
     const { data } = await supabase
@@ -302,8 +407,19 @@ export function StakeholdersView() {
     if (updates.interest !== undefined) dbUpdates.interest = updates.interest;
     if (updates.engagement !== undefined) dbUpdates.engagement = updates.engagement;
     if (updates.communicationPlan !== undefined) dbUpdates.communication_plan = updates.communicationPlan;
-    if (updates.sentiment !== undefined) dbUpdates.sentiment = updates.sentiment;
     if (updates.lastCommunicationDate !== undefined) dbUpdates.last_communication_date = updates.lastCommunicationDate;
+
+    if (updates.sentiment !== undefined) {
+      dbUpdates.sentiment = updates.sentiment;
+      // Log sentiment change to history
+      await supabase.from('stakeholder_sentiment_history' as any).insert({
+        stakeholder_id: id,
+        sentiment: updates.sentiment,
+        recorded_at: new Date().toISOString().slice(0, 10),
+      } as any);
+      setChartKey(k => k + 1);
+    }
+
     await supabase.from('stakeholders' as any).update(dbUpdates).eq('id', id);
   };
 
@@ -334,11 +450,14 @@ export function StakeholdersView() {
           </Button>
         </div>
 
-        {/* Matrix */}
+        {/* Matrix + Chart side by side */}
         {stakeholders.length > 0 && (
-          <div>
-            <Label className="text-sm font-semibold mb-3 block">Power / Interest Matrix</Label>
-            <PowerInterestMatrix stakeholders={stakeholders} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <Label className="text-sm font-semibold mb-3 block">Power / Interest Matrix</Label>
+              <PowerInterestMatrix stakeholders={stakeholders} />
+            </div>
+            <SentimentHistoryChart key={chartKey} projectId={project.id} />
           </div>
         )}
 
@@ -429,37 +548,35 @@ export function StakeholdersView() {
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className={cn(
-                                'h-8 text-xs justify-start font-normal w-full',
-                                !s.lastCommunicationDate && 'text-muted-foreground',
-                                overdue && 'border-yellow-500 text-yellow-700 dark:text-yellow-400',
-                              )}
-                            >
-                              <CalendarIcon className="w-3 h-3 mr-1 shrink-0" />
-                              {s.lastCommunicationDate
-                                ? format(parseISO(s.lastCommunicationDate), 'MMM d')
-                                : 'Set date'}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={s.lastCommunicationDate ? parseISO(s.lastCommunicationDate) : undefined}
-                              onSelect={d => {
-                                if (d) updateStakeholder(s.id, { lastCommunicationDate: format(d, 'yyyy-MM-dd') });
-                              }}
-                              initialFocus
-                              className="p-3 pointer-events-auto"
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={cn(
+                              'h-8 text-xs justify-start font-normal w-full',
+                              !s.lastCommunicationDate && 'text-muted-foreground',
+                              overdue && 'border-yellow-500 text-yellow-700 dark:text-yellow-400',
+                            )}
+                          >
+                            <CalendarIcon className="w-3 h-3 mr-1 shrink-0" />
+                            {s.lastCommunicationDate
+                              ? format(parseISO(s.lastCommunicationDate), 'MMM d')
+                              : 'Set date'}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={s.lastCommunicationDate ? parseISO(s.lastCommunicationDate) : undefined}
+                            onSelect={d => {
+                              if (d) updateStakeholder(s.id, { lastCommunicationDate: format(d, 'yyyy-MM-dd') });
+                            }}
+                            initialFocus
+                            className="p-3 pointer-events-auto"
+                          />
+                        </PopoverContent>
+                      </Popover>
                     </TableCell>
                     <TableCell>
                       <Input
@@ -498,7 +615,6 @@ export function StakeholdersView() {
         </div>
       </div>
 
-      {/* Comm Log Dialog */}
       {logDialogStakeholder && (
         <CommLogDialog
           stakeholder={logDialogStakeholder}
