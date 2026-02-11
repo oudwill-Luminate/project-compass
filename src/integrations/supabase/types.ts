@@ -478,6 +478,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_working_days: {
+        Args: { _days: number; _include_weekends: boolean; _start: string }
+        Returns: string
+      }
+      cascade_task_dates: {
+        Args: {
+          _include_weekends: boolean
+          _new_end: string
+          _new_start: string
+          _task_id: string
+        }
+        Returns: number
+      }
       get_project_id_from_bucket: {
         Args: { _bucket_id: string }
         Returns: string
@@ -494,6 +507,14 @@ export type Database = {
       is_project_owner: {
         Args: { _project_id: string; _user_id: string }
         Returns: boolean
+      }
+      next_working_day: {
+        Args: { _d: string; _include_weekends: boolean }
+        Returns: string
+      }
+      working_days_diff: {
+        Args: { _end: string; _include_weekends: boolean; _start: string }
+        Returns: number
       }
     }
     Enums: {
