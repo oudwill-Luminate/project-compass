@@ -1,38 +1,27 @@
 
+## Fix Table Width Rendering
 
-## Add "Responsible" Field to Tasks
+### Problem
+The table's `minWidth` is set to `900px`, but the actual column widths add up to approximately 1174px minimum. This causes columns on the right side (Actual cost, Actions) to be squished or cut off.
 
-### What This Does
-Adds a free-text "Responsible" field to each task, allowing you to type in the name of a contractor, vendor, or other responsible party -- separate from the task Owner (who is a project member).
+### Solution
+Calculate the minimum width dynamically based on which columns are visible, so the table always has enough room for all active columns.
 
 ### Changes
 
-**1. Database Migration**
-Add one column to the `tasks` table:
-- `responsible` (text, nullable, default null)
+**1. `src/components/tableColumns.ts`**
+- Add a helper function `calcMinWidth(visibleIds)` that sums up the pixel widths of all visible columns (using fixed values; the flexible `task` column counts as its minimum 200px)
+- This ensures the min-width adapts when columns are hidden/shown
 
-**2. Type Definition (`src/types/project.ts`)**
-Add to the `Task` interface:
-- `responsible: string | null`
+**2. `src/components/TableView.tsx`**
+- Replace the hardcoded `minWidth: '900px'` on the header and footer with the calculated min-width from the new helper
+- Apply the same min-width consistently to both header and bucket footer rows
 
-**3. Data Layer (`src/hooks/useProjectData.ts`)**
-- Add `responsible` to the `TaskRow` interface
-- Map it in `buildTaskTree` when constructing Task objects
-- Include it in the DB update mapping in `updateTask`
-- Include it in `createTaskFull` insert
-- Default to `null` in `addTask`
+**3. `src/components/TaskRow.tsx`**
+- Replace the hardcoded `minWidth: '900px'` on task rows with the same calculated min-width
+- Pass the min-width value as a prop (or calculate from `visibleColumnIds`)
 
-**4. Task Edit Dialog (`src/components/TaskDialog.tsx`)**
-- Add a "Responsible" text input field below the Owner display or next to Status/Priority
-- Placed in the existing layout, likely as a full-width field after the Status and Priority row
-- Placeholder text: "e.g. contractor or vendor name"
-
-**5. Table View (`src/components/TaskRow.tsx`)**
-- Add a new column for "Responsible" in the grid
-- Display the responsible name as text (truncated if long)
-- Update the grid column template to accommodate the new column
-
-**6. Table Header (`src/components/TableView.tsx`)**
-- Add "Responsible" column header alongside the existing headers (Owner, Status, etc.)
-- Update the grid template to match TaskRow
-
+### Technical Details
+- Column pixel values: drag=24, task=200(min), status=140, priority=100, owner=100, responsible=120, start=110, end=110, estCost=110, actual=110, actions=50
+- The function parses widths from the column definitions, treating `minmax(Xpx,1fr)` as X
+- Add ~32px padding buffer for the grid container padding
