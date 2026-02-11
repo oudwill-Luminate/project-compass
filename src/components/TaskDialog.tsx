@@ -188,6 +188,17 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
             </div>
           </div>
 
+          {/* Responsible */}
+          <div>
+            <Label className="text-xs font-medium">Responsible</Label>
+            <Input
+              value={formData.responsible || ''}
+              onChange={e => setFormData({ ...formData, responsible: e.target.value || null })}
+              placeholder="e.g. contractor or vendor name"
+              className="mt-1"
+            />
+          </div>
+
           {/* Costs */}
           <div className="grid grid-cols-2 gap-4">
             <div>

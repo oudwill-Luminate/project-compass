@@ -155,6 +155,7 @@ export type Database = {
           parent_task_id: string | null
           position: number
           priority: Database["public"]["Enums"]["task_priority"]
+          responsible: string | null
           risk_impact: number
           risk_probability: number
           start_date: string
@@ -178,6 +179,7 @@ export type Database = {
           parent_task_id?: string | null
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
+          responsible?: string | null
           risk_impact?: number
           risk_probability?: number
           start_date?: string
@@ -201,6 +203,7 @@ export type Database = {
           parent_task_id?: string | null
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
+          responsible?: string | null
           risk_impact?: number
           risk_probability?: number
           start_date?: string

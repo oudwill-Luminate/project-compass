@@ -104,7 +104,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
     <>
       <div
         className={cn(
-          "grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm",
+          "grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm",
           hasSubTasks && "font-medium bg-muted/10"
         )}
         style={{ borderLeft: `4px solid ${bucketColor}15`, paddingLeft: `${16 + indent}px` }}
@@ -178,6 +178,10 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
         <div className="flex items-center gap-1.5">
           <OwnerAvatar owner={task.owner} />
         </div>
+
+        <span className="text-muted-foreground text-xs truncate" title={task.responsible || ''}>
+          {task.responsible || '—'}
+        </span>
 
         <span className="text-muted-foreground text-xs flex items-center gap-1">
           {format(parseISO(rolled.startDate), 'MMM dd')}
