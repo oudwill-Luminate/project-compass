@@ -1,5 +1,6 @@
 export type TaskStatus = 'done' | 'working' | 'stuck' | 'not-started';
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
+export type DependencyType = 'FS' | 'FF' | 'SS' | 'SF';
 
 export interface Owner {
   id: string;
@@ -18,6 +19,7 @@ export interface Task {
   estimatedCost: number;
   actualCost: number;
   dependsOn: string | null;
+  dependencyType: DependencyType;
   flaggedAsRisk: boolean;
   riskImpact: number; // 1-5
   riskProbability: number; // 1-5

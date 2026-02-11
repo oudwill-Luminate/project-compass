@@ -143,6 +143,7 @@ export type Database = {
           actual_cost: number
           bucket_id: string
           created_at: string
+          dependency_type: Database["public"]["Enums"]["dependency_type"]
           depends_on: string | null
           end_date: string
           estimated_cost: number
@@ -162,6 +163,7 @@ export type Database = {
           actual_cost?: number
           bucket_id: string
           created_at?: string
+          dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
           end_date?: string
           estimated_cost?: number
@@ -181,6 +183,7 @@ export type Database = {
           actual_cost?: number
           bucket_id?: string
           created_at?: string
+          dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
           end_date?: string
           estimated_cost?: number
@@ -237,6 +240,7 @@ export type Database = {
       }
     }
     Enums: {
+      dependency_type: "FS" | "FF" | "SS" | "SF"
       project_role: "owner" | "editor" | "viewer"
       task_priority: "critical" | "high" | "medium" | "low"
       task_status: "done" | "working" | "stuck" | "not-started"
@@ -367,6 +371,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      dependency_type: ["FS", "FF", "SS", "SF"],
       project_role: ["owner", "editor", "viewer"],
       task_priority: ["critical", "high", "medium", "low"],
       task_status: ["done", "working", "stuck", "not-started"],
