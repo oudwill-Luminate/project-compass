@@ -495,7 +495,7 @@ export function useProjectData(projectId: string | undefined) {
     const bucket = project?.buckets.find(b => b.id === bucketId);
     const position = bucket ? flattenTasks(bucket.tasks).length : 0;
 
-    await supabase.from('tasks').insert({
+    const { error } = await supabase.from('tasks').insert({
       bucket_id: bucketId,
       title,
       position,
@@ -504,7 +504,37 @@ export function useProjectData(projectId: string | undefined) {
       end_date: endDate,
       parent_task_id: parentTaskId || null,
     });
+    if (error) console.error('addTask error:', error);
   }, [user, project, toOwner]);
+
+  const createTaskFull = useCallback(async (bucketId: string, taskData: Omit<Task, 'id' | 'subTasks'>) => {
+    if (!user) return;
+
+    const bucket = project?.buckets.find(b => b.id === bucketId);
+    const position = bucket ? flattenTasks(bucket.tasks).length : 0;
+
+    const { error } = await supabase.from('tasks').insert({
+      bucket_id: bucketId,
+      title: taskData.title,
+      status: taskData.status,
+      priority: taskData.priority,
+      owner_id: taskData.owner?.id === 'unknown' ? null : (taskData.owner?.id || user.id),
+      start_date: taskData.startDate,
+      end_date: taskData.endDate,
+      estimated_cost: taskData.estimatedCost,
+      actual_cost: taskData.actualCost,
+      depends_on: taskData.dependsOn || null,
+      dependency_type: taskData.dependencyType,
+      flagged_as_risk: taskData.flaggedAsRisk,
+      risk_impact: taskData.riskImpact,
+      risk_probability: taskData.riskProbability,
+      buffer_days: taskData.bufferDays,
+      buffer_position: taskData.bufferPosition,
+      parent_task_id: taskData.parentTaskId || null,
+      position,
+    });
+    if (error) console.error('createTaskFull error:', error);
+  }, [user, project]);
 
   const moveTask = useCallback(async (taskId: string, newBucketId: string, newPosition: number) => {
     setProject(prev => {
@@ -550,5 +580,5 @@ export function useProjectData(projectId: string | undefined) {
     if (error) console.error('deleteTask error:', error);
   }, []);
 
-  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, addTask, moveTask, deleteTask, refetch: fetchAll, profiles, toOwner };
+  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, addTask, createTaskFull, moveTask, deleteTask, refetch: fetchAll, profiles, toOwner };
 }

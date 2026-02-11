@@ -5,8 +5,10 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { TaskRow } from './TaskRow';
+import { TaskDialog } from './TaskDialog';
+import { Task } from '@/types/project';
 import { cn } from '@/lib/utils';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addDays } from 'date-fns';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,10 +41,34 @@ function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { p
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, addTask, moveTask, deleteTask } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, addTask, createTaskFull, moveTask, deleteTask } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
-  const [addingTaskInBucket, setAddingTaskInBucket] = useState<string | null>(null);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
+  const [newTaskBucketId, setNewTaskBucketId] = useState<string | null>(null);
+
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const defaultEndDate = format(addDays(new Date(), 7), 'yyyy-MM-dd');
+
+  const newTaskTemplate: Task = {
+    id: 'new',
+    title: 'New Task',
+    status: 'not-started',
+    priority: 'medium',
+    owner: { id: 'unknown', name: 'Unassigned', color: '#999' },
+    startDate: today,
+    endDate: defaultEndDate,
+    estimatedCost: 0,
+    actualCost: 0,
+    dependsOn: null,
+    dependencyType: 'FS',
+    flaggedAsRisk: false,
+    bufferDays: 0,
+    bufferPosition: 'end',
+    riskImpact: 1,
+    riskProbability: 1,
+    parentTaskId: null,
+    subTasks: [],
+  };
 
   const totalEstimated = project.buckets.reduce(
     (sum, b) => sum + flattenTasks(b.tasks).reduce((s, t) => s + t.estimatedCost, 0), 0
@@ -200,21 +226,13 @@ export function TableView() {
 
                         {/* Add Task */}
                         <div className="px-4 py-1.5" style={{ borderLeft: `4px solid ${bucket.color}` }}>
-                          {addingTaskInBucket === bucket.id ? (
-                            <InlineInput
-                              placeholder="Task name…"
-                              onSubmit={(name) => { addTask(bucket.id, name); setAddingTaskInBucket(null); }}
-                              onCancel={() => setAddingTaskInBucket(null)}
-                            />
-                          ) : (
-                            <button
-                              onClick={() => setAddingTaskInBucket(bucket.id)}
-                              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors ml-6"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Add Task</span>
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setNewTaskBucketId(bucket.id)}
+                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors ml-6"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Task</span>
+                          </button>
                         </div>
 
                         {/* Bucket Footer */}
@@ -300,6 +318,20 @@ export function TableView() {
           </div>
         </div>
       </div>
+
+      {/* New Task Dialog */}
+      {newTaskBucketId && (
+        <TaskDialog
+          task={newTaskTemplate}
+          open={true}
+          onOpenChange={(open) => { if (!open) setNewTaskBucketId(null); }}
+          isNew
+          onCreateSave={(data) => {
+            createTaskFull(newTaskBucketId, data);
+            setNewTaskBucketId(null);
+          }}
+        />
+      )}
     </div>
   );
 }
