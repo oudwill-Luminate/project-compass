@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Project, Bucket, Task, Owner, DependencyType } from '@/types/project';
 import { useAuth } from '@/context/AuthContext';
 import { differenceInDays, parseISO, addDays, format } from 'date-fns';
+import { toast } from 'sonner';
 
 interface ProfileRow {
   id: string;
@@ -152,50 +153,106 @@ function addSubTaskToTree(tasks: Task[], parentTaskId: string, newTask: Task): T
   });
 }
 
+/** Detect circular dependency: walk the chain from proposedDependsOn and check if we reach taskId */
+function detectCircularDependency(
+  taskId: string,
+  proposedDependsOn: string,
+  allTasks: Task[]
+): boolean {
+  const visited = new Set<string>();
+  let current: string | null = proposedDependsOn;
+  while (current) {
+    if (current === taskId) return true;
+    if (visited.has(current)) break;
+    visited.add(current);
+    const task = allTasks.find(t => t.id === current);
+    current = task?.dependsOn ?? null;
+  }
+  return false;
+}
+
+/** Add working days, skipping weekends when includeWeekends is false */
+function addWorkingDays(start: Date, days: number, includeWeekends: boolean): Date {
+  if (includeWeekends) return addDays(start, days);
+  let result = start;
+  let remaining = Math.abs(days);
+  const direction = days >= 0 ? 1 : -1;
+  while (remaining > 0) {
+    result = addDays(result, direction);
+    const day = result.getDay();
+    if (day !== 0 && day !== 6) remaining--;
+  }
+  return result;
+}
+
+/** Advance to next working day if date falls on a weekend */
+function nextWorkingDay(date: Date, includeWeekends: boolean): Date {
+  if (includeWeekends) return date;
+  let d = date;
+  while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, 1);
+  return d;
+}
+
+/** Count working days between two dates */
+function workingDaysDiff(start: Date, end: Date, includeWeekends: boolean): number {
+  if (includeWeekends) return differenceInDays(end, start);
+  let count = 0;
+  let d = start;
+  const direction = end >= start ? 1 : -1;
+  while (format(d, 'yyyy-MM-dd') !== format(end, 'yyyy-MM-dd')) {
+    d = addDays(d, direction);
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) count += direction;
+  }
+  return count;
+}
+
 /** Calculate new dates for a dependent task based on dependency type, preserving duration.
  *  Buffer is factored in: for FS/FF the predecessor's end buffer extends the effective end date,
  *  for SS/SF the predecessor's start buffer shifts the effective start date earlier. */
 function scheduleTask(
   predecessor: { startDate: string; endDate: string; bufferDays?: number; bufferPosition?: 'start' | 'end' },
   dependent: { startDate: string; endDate: string },
-  depType: DependencyType
+  depType: DependencyType,
+  includeWeekends: boolean = true
 ): { startDate: string; endDate: string } {
-  const duration = differenceInDays(parseISO(dependent.endDate), parseISO(dependent.startDate));
+  const duration = workingDaysDiff(parseISO(dependent.startDate), parseISO(dependent.endDate), includeWeekends);
   const bufferDays = predecessor.bufferDays || 0;
   const bufferPos = predecessor.bufferPosition || 'end';
 
   // Effective dates accounting for buffer
   const effectiveEnd = bufferPos === 'end'
-    ? addDays(parseISO(predecessor.endDate), bufferDays)
+    ? addWorkingDays(parseISO(predecessor.endDate), bufferDays, includeWeekends)
     : parseISO(predecessor.endDate);
   const effectiveStart = bufferPos === 'start'
-    ? addDays(parseISO(predecessor.startDate), -bufferDays)
+    ? addWorkingDays(parseISO(predecessor.startDate), -bufferDays, includeWeekends)
     : parseISO(predecessor.startDate);
 
   switch (depType) {
     case 'FS': {
-      const newStart = addDays(effectiveEnd, 1);
+      const newStart = nextWorkingDay(addDays(effectiveEnd, 1), includeWeekends);
       return {
         startDate: format(newStart, 'yyyy-MM-dd'),
-        endDate: format(addDays(newStart, duration), 'yyyy-MM-dd'),
+        endDate: format(addWorkingDays(newStart, duration, includeWeekends), 'yyyy-MM-dd'),
       };
     }
     case 'FF': {
       return {
-        startDate: format(addDays(effectiveEnd, -duration), 'yyyy-MM-dd'),
+        startDate: format(addWorkingDays(effectiveEnd, -duration, includeWeekends), 'yyyy-MM-dd'),
         endDate: format(effectiveEnd, 'yyyy-MM-dd'),
       };
     }
     case 'SS': {
+      const newStart = nextWorkingDay(effectiveStart, includeWeekends);
       return {
-        startDate: format(effectiveStart, 'yyyy-MM-dd'),
-        endDate: format(addDays(effectiveStart, duration), 'yyyy-MM-dd'),
+        startDate: format(newStart, 'yyyy-MM-dd'),
+        endDate: format(addWorkingDays(newStart, duration, includeWeekends), 'yyyy-MM-dd'),
       };
     }
     case 'SF': {
-      const newEnd = addDays(effectiveStart, -1);
+      const newEnd = nextWorkingDay(addDays(effectiveStart, -1), includeWeekends);
       return {
-        startDate: format(addDays(newEnd, -duration), 'yyyy-MM-dd'),
+        startDate: format(addWorkingDays(newEnd, -duration, includeWeekends), 'yyyy-MM-dd'),
         endDate: format(newEnd, 'yyyy-MM-dd'),
       };
     }
@@ -280,6 +337,7 @@ export function useProjectData(projectId: string | undefined) {
       id: projData.id,
       name: projData.name,
       contingencyPercent: Number(projData.contingency_percent),
+      includeWeekends: projData.include_weekends ?? false,
       buckets,
     };
 
@@ -327,13 +385,19 @@ export function useProjectData(projectId: string | undefined) {
       const depType = (updates.dependencyType !== undefined ? updates.dependencyType : oldTask.dependencyType) as DependencyType;
 
       if (predecessorId) {
+        // Circular dependency check
+        if (detectCircularDependency(taskId, predecessorId, allTasks)) {
+          toast.error('Circular dependency detected. This dependency would create a loop.');
+          return;
+        }
+
         const predecessor = allTasks.find(t => t.id === predecessorId);
         if (predecessor) {
           const currentTask = {
             startDate: updates.startDate || oldTask.startDate,
             endDate: updates.endDate || oldTask.endDate,
           };
-          const scheduled = scheduleTask(predecessor, currentTask, depType);
+          const scheduled = scheduleTask(predecessor, currentTask, depType, project.includeWeekends);
           updates = { ...updates, startDate: scheduled.startDate, endDate: scheduled.endDate };
         }
       }
@@ -384,7 +448,7 @@ export function useProjectData(projectId: string | undefined) {
 
       const dependents = allTasks.filter(t => t.dependsOn === predecessorTask.id);
       for (const dep of dependents) {
-        const scheduled = scheduleTask(predecessorTask, dep, dep.dependencyType);
+        const scheduled = scheduleTask(predecessorTask, dep, dep.dependencyType, project.includeWeekends);
         await supabase.from('tasks').update({
           start_date: scheduled.startDate,
           end_date: scheduled.endDate,
@@ -415,6 +479,12 @@ export function useProjectData(projectId: string | undefined) {
     if (!projectId) return;
     setProject(prev => prev ? { ...prev, contingencyPercent: percent } : prev);
     await supabase.from('projects').update({ contingency_percent: percent }).eq('id', projectId);
+  }, [projectId]);
+
+  const updateIncludeWeekends = useCallback(async (value: boolean) => {
+    if (!projectId) return;
+    setProject(prev => prev ? { ...prev, includeWeekends: value } : prev);
+    await supabase.from('projects').update({ include_weekends: value } as any).eq('id', projectId);
   }, [projectId]);
 
   const addBucket = useCallback(async (name: string) => {
@@ -648,5 +718,5 @@ export function useProjectData(projectId: string | undefined) {
     await supabase.from('projects').delete().eq('id', projectId);
   }, [projectId, project]);
 
-  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, refetch: fetchAll, profiles, toOwner };
+  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, refetch: fetchAll, profiles, toOwner };
 }

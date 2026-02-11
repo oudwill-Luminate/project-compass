@@ -46,6 +46,7 @@ export interface Project {
   id: string;
   name: string;
   contingencyPercent: number;
+  includeWeekends: boolean;
   buckets: Bucket[];
 }
 

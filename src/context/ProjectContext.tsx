@@ -11,6 +11,7 @@ interface ProjectContextType {
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   toggleBucket: (bucketId: string) => void;
   updateContingency: (percent: number) => void;
+  updateIncludeWeekends: (value: boolean) => void;
   updateProjectName: (name: string) => void;
   deleteProject: () => Promise<void>;
   addBucket: (name: string) => void;
@@ -30,7 +31,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -43,7 +44,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
           collapsed: collapsedBuckets.has(b.id),
         })),
       }
-    : { id: '', name: '', contingencyPercent: 10, buckets: [] };
+    : { id: '', name: '', contingencyPercent: 10, includeWeekends: false, buckets: [] };
 
   const getAllTasks = useCallback(() => {
     return projectWithCollapsed.buckets.flatMap(b => flattenTasks(b.tasks));
@@ -79,6 +80,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         updateTask,
         toggleBucket,
         updateContingency,
+        updateIncludeWeekends: dbUpdateIncludeWeekends,
         updateProjectName: dbUpdateProjectName,
         deleteProject: dbDeleteProject,
         addBucket: dbAddBucket,
