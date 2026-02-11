@@ -14,16 +14,232 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      buckets: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          name: string
+          position: number
+          project_id: string
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+          position?: number
+          project_id: string
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+          position?: number
+          project_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "buckets_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string
+          id: string
+          job_title: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string
+          id: string
+          job_title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string
+          id?: string
+          job_title?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      project_members: {
+        Row: {
+          created_at: string
+          id: string
+          project_id: string
+          role: Database["public"]["Enums"]["project_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          project_id: string
+          role?: Database["public"]["Enums"]["project_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          project_id?: string
+          role?: Database["public"]["Enums"]["project_role"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_members_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          contingency_percent: number
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          contingency_percent?: number
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          contingency_percent?: number
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      tasks: {
+        Row: {
+          actual_cost: number
+          bucket_id: string
+          created_at: string
+          depends_on: string | null
+          end_date: string
+          estimated_cost: number
+          flagged_as_risk: boolean
+          id: string
+          owner_id: string | null
+          position: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          risk_impact: number
+          risk_probability: number
+          start_date: string
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          actual_cost?: number
+          bucket_id: string
+          created_at?: string
+          depends_on?: string | null
+          end_date?: string
+          estimated_cost?: number
+          flagged_as_risk?: boolean
+          id?: string
+          owner_id?: string | null
+          position?: number
+          priority?: Database["public"]["Enums"]["task_priority"]
+          risk_impact?: number
+          risk_probability?: number
+          start_date?: string
+          status?: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          actual_cost?: number
+          bucket_id?: string
+          created_at?: string
+          depends_on?: string | null
+          end_date?: string
+          estimated_cost?: number
+          flagged_as_risk?: boolean
+          id?: string
+          owner_id?: string | null
+          position?: number
+          priority?: Database["public"]["Enums"]["task_priority"]
+          risk_impact?: number
+          risk_probability?: number
+          start_date?: string
+          status?: Database["public"]["Enums"]["task_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "buckets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_depends_on_fkey"
+            columns: ["depends_on"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_project_id_from_bucket: {
+        Args: { _bucket_id: string }
+        Returns: string
+      }
+      get_project_id_from_task: { Args: { _task_id: string }; Returns: string }
+      is_project_editor: {
+        Args: { _project_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_project_member: {
+        Args: { _project_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_project_owner: {
+        Args: { _project_id: string; _user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      project_role: "owner" | "editor" | "viewer"
+      task_priority: "critical" | "high" | "medium" | "low"
+      task_status: "done" | "working" | "stuck" | "not-started"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +366,10 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      project_role: ["owner", "editor", "viewer"],
+      task_priority: ["critical", "high", "medium", "low"],
+      task_status: ["done", "working", "stuck", "not-started"],
+    },
   },
 } as const
