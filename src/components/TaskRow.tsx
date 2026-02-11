@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { format, parseISO, addDays } from 'date-fns';
+import { format, parseISO, addDays, differenceInDays } from 'date-fns';
 import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield } from 'lucide-react';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
@@ -269,6 +269,30 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
         ${rolled.actualCost.toLocaleString()}
       </span>
     );
+  }
+
+  if (show('slippage')) {
+    const hasBaseline = task.baselineEndDate && task.baselineStartDate;
+    if (hasBaseline) {
+      const slipDays = differenceInDays(parseISO(rolled.endDate), parseISO(task.baselineEndDate!));
+      cells.push(
+        <span
+          key="slippage"
+          className={cn(
+            'text-right text-xs font-medium tabular-nums',
+            slipDays > 0 && 'text-destructive',
+            slipDays < 0 && 'text-[hsl(var(--status-done))]',
+            slipDays === 0 && 'text-muted-foreground'
+          )}
+        >
+          {slipDays > 0 ? `+${slipDays}d` : slipDays < 0 ? `${slipDays}d` : '0d'}
+        </span>
+      );
+    } else {
+      cells.push(
+        <span key="slippage" className="text-right text-xs text-muted-foreground">—</span>
+      );
+    }
   }
 
   if (show('actions')) {
