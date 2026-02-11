@@ -5,10 +5,10 @@ import {
 } from 'date-fns';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
-import { computeCriticalPath } from '@/lib/criticalPath';
 import { OwnerAvatar } from './OwnerAvatar';
 import { ChevronRight, ChevronDown, Shield, AlertTriangle } from 'lucide-react';
 import { Task, STATUS_CONFIG } from '@/types/project';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
 function TaskTimelineRow({
   task,
@@ -19,6 +19,7 @@ function TaskTimelineRow({
   todayPercent,
   getTaskPosition,
   criticalTaskIds,
+  slackDays,
 }: {
   task: Task;
   depth: number;
@@ -28,6 +29,7 @@ function TaskTimelineRow({
   todayPercent: number;
   getTaskPosition: (s: string, e: string) => { left: string; width: string };
   criticalTaskIds: Set<string>;
+  slackDays: Map<string, number>;
 }) {
   const [expanded, setExpanded] = useState(true);
   const hasSubTasks = task.subTasks.length > 0;
@@ -128,6 +130,29 @@ function TaskTimelineRow({
               </div>
             );
           })()}
+          {/* Slack indicator (dotted line for leaf tasks with positive slack) */}
+          {!hasSubTasks && (() => {
+            const slack = slackDays.get(task.id) || 0;
+            if (slack <= 0) return null;
+            const taskEndPct = (differenceInDays(parseISO(displayEnd), timelineStart) + 1) / totalDays * 100;
+            const slackWidthPct = (slack / totalDays) * 100;
+            return (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="absolute top-[22px] h-0 border-t-2 border-dashed border-muted-foreground/40"
+                      style={{
+                        left: `${taskEndPct}%`,
+                        width: `${slackWidthPct}%`,
+                      }}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent>Slack: {slack} day{slack !== 1 ? 's' : ''}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })()}
           {/* Baseline Bar */}
           {!hasSubTasks && task.baselineStartDate && task.baselineEndDate && (() => {
             const baselinePos = getTaskPosition(task.baselineStartDate, task.baselineEndDate);
@@ -199,6 +224,7 @@ function TaskTimelineRow({
           todayPercent={todayPercent}
           getTaskPosition={getTaskPosition}
           criticalTaskIds={criticalTaskIds}
+          slackDays={slackDays}
         />
       ))}
     </>
@@ -206,7 +232,7 @@ function TaskTimelineRow({
 }
 
 export function TimelineView() {
-  const { project } = useProject();
+  const { project, criticalTaskIds, slackDays } = useProject();
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
   const toggleBucketCollapse = (bucketId: string) => {
@@ -222,8 +248,7 @@ export function TimelineView() {
     project.buckets.flatMap(b => flattenTasks(b.tasks).map(t => ({ ...t, bucketName: b.name, bucketColor: b.color })))
   , [project.buckets]);
 
-  // Critical Path using shared utility
-  const { criticalTaskIds } = useMemo(() => computeCriticalPath(allTasks), [allTasks]);
+  // Critical path & slack from context (already computed)
 
   const { timelineStart, totalDays, weeks } = useMemo(() => {
     if (allTasks.length === 0) {
@@ -285,6 +310,10 @@ export function TimelineView() {
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-3 rounded-sm border-2 border-orange-500 bg-transparent" />
             <span>Critical Path</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-0 border-t-2 border-dashed border-muted-foreground/40" />
+            <span>Slack</span>
           </div>
         </div>
       </div>
@@ -350,6 +379,7 @@ export function TimelineView() {
                   todayPercent={todayPercent}
                   getTaskPosition={getTaskPosition}
                   criticalTaskIds={criticalTaskIds}
+                  slackDays={slackDays}
                 />
               ))}
             </div>

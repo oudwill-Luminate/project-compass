@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, 
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
-import { computeCriticalPath } from '@/lib/criticalPath';
 import { TaskRow } from './TaskRow';
 import { TaskDialog } from './TaskDialog';
 import { BucketDialog } from './BucketDialog';
@@ -48,16 +47,12 @@ function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { p
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members, setBaseline, clearBaseline } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members, setBaseline, clearBaseline, slackDays } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
   const [editDialogBucketId, setEditDialogBucketId] = useState<string | null>(null);
   const [newTaskBucketId, setNewTaskBucketId] = useState<string | null>(null);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(loadVisibleColumns);
-
-  // Compute slack days for all tasks
-  const allFlatTasks = useMemo(() => project.buckets.flatMap(b => flattenTasks(b.tasks)), [project.buckets]);
-  const { slackDays } = useMemo(() => computeCriticalPath(allFlatTasks), [allFlatTasks]);
 
   const toggleColumn = (colId: string) => {
     setVisibleColumnIds(prev => {
