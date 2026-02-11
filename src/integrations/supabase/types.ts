@@ -18,8 +18,10 @@ export type Database = {
         Row: {
           color: string
           created_at: string
+          description: string
           id: string
           name: string
+          owner_id: string | null
           position: number
           project_id: string
           updated_at: string
@@ -27,8 +29,10 @@ export type Database = {
         Insert: {
           color?: string
           created_at?: string
+          description?: string
           id?: string
           name: string
+          owner_id?: string | null
           position?: number
           project_id: string
           updated_at?: string
@@ -36,8 +40,10 @@ export type Database = {
         Update: {
           color?: string
           created_at?: string
+          description?: string
           id?: string
           name?: string
+          owner_id?: string | null
           position?: number
           project_id?: string
           updated_at?: string

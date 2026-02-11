@@ -6,6 +6,8 @@ import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { TaskRow } from './TaskRow';
 import { TaskDialog } from './TaskDialog';
+import { BucketDialog } from './BucketDialog';
+import { OwnerAvatar } from './OwnerAvatar';
 import { Task } from '@/types/project';
 import { cn } from '@/lib/utils';
 import { format, parseISO, addDays } from 'date-fns';
@@ -44,9 +46,10 @@ function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { p
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, addTask, createTaskFull, moveTask, deleteTask } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, addTask, createTaskFull, moveTask, deleteTask, members } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
+  const [editDialogBucketId, setEditDialogBucketId] = useState<string | null>(null);
   const [newTaskBucketId, setNewTaskBucketId] = useState<string | null>(null);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(loadVisibleColumns);
 
@@ -203,13 +206,32 @@ export function TableView() {
                         onCancel={() => setEditingBucketId(null)}
                       />
                     ) : (
-                      <span
-                        onDoubleClick={(e) => { e.stopPropagation(); setEditingBucketId(bucket.id); }}
-                        className="font-bold text-sm text-left cursor-pointer select-none"
-                        style={{ color: bucket.color }}
-                      >
-                        {bucket.name}
-                      </span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {bucket.ownerId && members.find(m => m.user_id === bucket.ownerId) && (
+                          <OwnerAvatar
+                            owner={{
+                              id: bucket.ownerId,
+                              name: members.find(m => m.user_id === bucket.ownerId)!.profile.display_name,
+                              color: bucket.color,
+                            }}
+                            size="sm"
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <span
+                            onDoubleClick={(e) => { e.stopPropagation(); setEditingBucketId(bucket.id); }}
+                            className="font-bold text-sm text-left cursor-pointer select-none block"
+                            style={{ color: bucket.color }}
+                          >
+                            {bucket.name}
+                          </span>
+                          {bucket.description && (
+                            <span className="text-[11px] text-muted-foreground truncate block max-w-xs">
+                              {bucket.description}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     )}
 
                     <span className="text-xs text-muted-foreground">
@@ -229,6 +251,10 @@ export function TableView() {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="bg-popover">
+                        <DropdownMenuItem onClick={() => setEditDialogBucketId(bucket.id)}>
+                          <Settings2 className="w-3.5 h-3.5 mr-2" />
+                          Edit Group
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setEditingBucketId(bucket.id)}>
                           <Pencil className="w-3.5 h-3.5 mr-2" />
                           Rename Group
@@ -384,6 +410,21 @@ export function TableView() {
           }}
         />
       )}
+
+      {/* Bucket Edit Dialog */}
+      {editDialogBucketId && (() => {
+        const bucket = project.buckets.find(b => b.id === editDialogBucketId);
+        if (!bucket) return null;
+        return (
+          <BucketDialog
+            bucket={bucket}
+            open={true}
+            onOpenChange={(open) => { if (!open) setEditDialogBucketId(null); }}
+            onSave={(updates) => updateBucket(editDialogBucketId, updates)}
+            members={members}
+          />
+        );
+      })()}
     </div>
   );
 }

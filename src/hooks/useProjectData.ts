@@ -17,6 +17,8 @@ interface BucketRow {
   name: string;
   color: string;
   position: number;
+  description: string;
+  owner_id: string | null;
 }
 
 interface TaskRow {
@@ -264,6 +266,8 @@ export function useProjectData(projectId: string | undefined) {
       id: b.id,
       name: b.name,
       color: b.color,
+      description: b.description || '',
+      ownerId: b.owner_id || null,
       collapsed: false,
       tasks: buildTaskTree(taskRows.filter(t => t.bucket_id === b.id), profileMap),
     }));
@@ -425,12 +429,18 @@ export function useProjectData(projectId: string | undefined) {
     if (error) console.error('addBucket error:', error);
   }, [projectId, project]);
 
-  const updateBucket = useCallback(async (bucketId: string, updates: { name?: string; color?: string }) => {
+  const updateBucket = useCallback(async (bucketId: string, updates: { name?: string; color?: string; description?: string; owner_id?: string | null }) => {
     setProject(prev => {
       if (!prev) return prev;
       return {
         ...prev,
-        buckets: prev.buckets.map(b => b.id === bucketId ? { ...b, ...updates } : b),
+        buckets: prev.buckets.map(b => b.id === bucketId ? {
+          ...b,
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.color !== undefined && { color: updates.color }),
+          ...(updates.description !== undefined && { description: updates.description }),
+          ...(updates.owner_id !== undefined && { ownerId: updates.owner_id }),
+        } : b),
       };
     });
 
