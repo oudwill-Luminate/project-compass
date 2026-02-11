@@ -397,39 +397,89 @@ export function TableView() {
         </div>
 
         {/* Financial Summary */}
-        <div className="mt-6 rounded-xl border bg-muted/20 p-5">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-            Project Financial Summary
-          </h3>
-          <div className="grid grid-cols-4 gap-6">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Total Budget</p>
-              <p className="text-2xl font-bold text-foreground tabular-nums">
-                ${totalEstimated.toLocaleString()}
-              </p>
+        {(() => {
+          const budgetWithContingency = totalEstimated + contingencyAmount;
+          const burnPercent = budgetWithContingency > 0 ? Math.min((totalActual / budgetWithContingency) * 100, 100) : 0;
+          const isOverBudget = totalActual > totalEstimated;
+          const isOverTotal = totalActual > budgetWithContingency;
+          const remaining = totalEstimated - totalActual;
+
+          return (
+            <div className="mt-6 rounded-xl border bg-muted/20 p-5">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+                Project Financial Summary
+              </h3>
+              <div className="grid grid-cols-4 gap-6 mb-5">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Total Budget</p>
+                  <p className="text-2xl font-bold text-foreground tabular-nums">
+                    ${totalEstimated.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Actual Cost</p>
+                  <p className={cn("text-2xl font-bold tabular-nums", isOverBudget ? "text-destructive" : "text-foreground")}>
+                    ${totalActual.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Remaining</p>
+                  <p className={cn("text-2xl font-bold tabular-nums", remaining < 0 ? "text-destructive" : "text-foreground")}>
+                    {remaining < 0 ? '-' : ''}${Math.abs(remaining).toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    With {project.contingencyPercent}% Contingency
+                  </p>
+                  <p className="text-2xl font-bold text-primary tabular-nums">
+                    ${budgetWithContingency.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              {/* Burn Rate Bar */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">Burn Rate</p>
+                  <p className={cn("text-xs font-bold tabular-nums", isOverTotal ? "text-destructive" : "text-foreground")}>
+                    {burnPercent.toFixed(1)}% of budget used
+                  </p>
+                </div>
+                <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+                  {/* Estimated budget threshold marker */}
+                  {project.contingencyPercent > 0 && (
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-foreground/30 z-10"
+                      style={{ left: `${(totalEstimated / budgetWithContingency) * 100}%` }}
+                      title="Base budget (excl. contingency)"
+                    />
+                  )}
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all duration-500",
+                      isOverTotal
+                        ? "bg-destructive"
+                        : isOverBudget
+                          ? "bg-[hsl(var(--priority-high))]"
+                          : "bg-[hsl(var(--status-done))]"
+                    )}
+                    style={{ width: `${burnPercent}%` }}
+                  />
+                </div>
+                {project.contingencyPercent > 0 && (
+                  <div className="flex justify-between mt-1">
+                    <span className="text-[10px] text-muted-foreground">$0</span>
+                    <span className="text-[10px] text-muted-foreground" style={{ marginRight: `${100 - (totalEstimated / budgetWithContingency) * 100}%` }}>
+                      Budget ${totalEstimated.toLocaleString()}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">${budgetWithContingency.toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Actual Cost</p>
-              <p className="text-2xl font-bold text-foreground tabular-nums">
-                ${totalActual.toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Remaining</p>
-              <p className="text-2xl font-bold text-foreground tabular-nums">
-                ${(totalEstimated - totalActual).toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">
-                With {project.contingencyPercent}% Contingency
-              </p>
-              <p className="text-2xl font-bold text-primary tabular-nums">
-                ${(totalEstimated + contingencyAmount).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
       {/* New Task Dialog */}

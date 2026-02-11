@@ -262,7 +262,10 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
 
   if (show('actual')) {
     cells.push(
-      <span key="actual" className={cn('text-right font-medium tabular-nums', rolled.actualCost > rolled.estimatedCost && 'text-destructive')}>
+      <span key="actual" className={cn(
+        'text-right font-medium tabular-nums',
+        rolled.actualCost > rolled.estimatedCost && 'text-destructive bg-destructive/10 px-2 py-0.5 rounded-md'
+      )}>
         ${rolled.actualCost.toLocaleString()}
       </span>
     );
