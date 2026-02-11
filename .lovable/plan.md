@@ -1,60 +1,69 @@
 
 
-## Add Sub-Tasks to the Project
+## Implement Professional Dependency Auto-Scheduling
 
-### Overview
-Add the ability for any task to have sub-tasks. Sub-tasks will be nested under their parent task in the table view. Costs and dates from sub-tasks will roll up to the parent task automatically.
+### Problem
+Currently, when you set a Finish-to-Start (FS) dependency (e.g., "Water Lines depends on Drainage"), the system only shifts dependent tasks when dates are manually changed. It does **not** auto-schedule the dependent task's dates when the dependency link is first created or when the dependency type changes.
 
-### Database Changes
+### Solution
+Add a proper dependency scheduling engine that:
+1. Automatically repositions a task's dates when a dependency is assigned or changed
+2. Handles all four standard dependency types (FS, FF, SS, SF)
+3. Cascades date changes through the entire dependency chain
+4. Detects circular dependencies to prevent infinite loops
 
-**Add `parent_task_id` column to the `tasks` table:**
-- New nullable UUID column `parent_task_id` referencing `tasks.id` (self-referential foreign key)
-- `ON DELETE CASCADE` so deleting a parent removes its sub-tasks
-- No enum or new table needed -- sub-tasks are just tasks with a parent
+### Dependency Type Scheduling Rules
 
-### Type Changes
+```text
+FS (Finish-to-Start): Dependent starts after predecessor finishes
+   Predecessor:  |======|
+   Dependent:              |======|
+   Rule: dependent.start = predecessor.end + 1 day
 
-**`src/types/project.ts`:**
-- Add `parentTaskId: string | null` and `subTasks: Task[]` to the `Task` interface
+FF (Finish-to-Finish): Both finish at the same time
+   Predecessor:  |======|
+   Dependent:       |======|
+   Rule: dependent.end = predecessor.end, start adjusted to keep duration
 
-### Data Layer Changes
+SS (Start-to-Start): Both start at the same time
+   Predecessor:  |======|
+   Dependent:    |======|
+   Rule: dependent.start = predecessor.start, end adjusted to keep duration
 
-**`src/hooks/useProjectData.ts`:**
-- Add `parent_task_id` to `TaskRow` interface
-- When building the project structure, nest tasks: tasks with a `parent_task_id` become children of their parent task's `subTasks` array (only top-level tasks appear in the bucket's `tasks` array)
-- `addTask` accepts an optional `parentTaskId` parameter for creating sub-tasks
-- `updateTask` maps `parentTaskId` to `parent_task_id` in DB updates
-- `deleteTask` works as-is (CASCADE handles children)
+SF (Start-to-Finish): Dependent finishes when predecessor starts
+   Predecessor:        |======|
+   Dependent:  |======|
+   Rule: dependent.end = predecessor.start - 1 day, start adjusted to keep duration
+```
 
-**`src/context/ProjectContext.tsx`:**
-- Update `addTask` signature to `(bucketId: string, title: string, parentTaskId?: string)`
-- Update `getAllTasks` to include sub-tasks in flattened list (for dependency dropdowns, etc.)
+### Technical Changes
 
-### UI Changes
+**`src/hooks/useProjectData.ts` -- `updateTask` function:**
 
-**`src/components/TaskRow.tsx`:**
-- Accept a `depth` prop (default 0) for indentation
-- If the task has sub-tasks, show an expand/collapse chevron
-- Render child `TaskRow` components recursively when expanded, indented by depth
-- Add an "+ Add Sub-task" option in the task's dropdown menu
+- Extract a reusable `scheduleDependentTask(predecessorTask, dependentTask, dependencyType)` function that calculates and returns the new start/end dates for the dependent task
+- When `dependsOn` or `dependencyType` changes on a task:
+  1. Look up the predecessor task
+  2. Calculate new dates using the dependency type rules
+  3. Update the task's dates in the database
+  4. Cascade: find all tasks that depend on this task and recursively reschedule them
+- When a predecessor's dates change (existing logic), use the same scheduling function to propagate to all dependents with correct dependency-type math (replacing the current simple "shift by delta" approach)
+- Add circular dependency detection (track visited task IDs) to prevent infinite loops
 
-**`src/components/TableView.tsx`:**
-- Pass `depth={0}` to top-level `TaskRow` components
-- Sub-task rows are rendered by `TaskRow` itself (recursive), so no major changes here
-- Subtotal calculations already sum all tasks in a bucket -- ensure sub-tasks are included
+**`src/components/TaskDialog.tsx` -- dependency change handling:**
 
-**`src/components/TaskDialog.tsx`:**
-- Show parent task name if editing a sub-task
-- Allow converting a standalone task into a sub-task (set parent) or vice versa
+- When the user changes `dependsOn` or `dependencyType` in the dialog, ensure the saved updates include both the dependency fields AND the recalculated dates, so the `updateTask` function processes them together
 
-### Roll-Up Logic
-- **Costs**: Parent task's estimated/actual cost = sum of its sub-tasks' costs (computed in the UI, not stored)
-- **Dates**: Parent task's start date = earliest sub-task start; end date = latest sub-task end (computed in the UI)
-- **Status**: If all sub-tasks are "done", parent shows "done". If any is "stuck", parent shows "stuck". Otherwise "working" if any are in progress, else "not-started"
-- Roll-ups are only applied when a task has sub-tasks. Tasks without sub-tasks retain their own values.
+**`src/hooks/useProjectData.ts` -- new helper function:**
 
-### Drag-and-Drop
-- Sub-tasks can be reordered within their parent
-- Sub-tasks cannot be dragged to a different parent (keeps it simple)
-- Top-level tasks can still be dragged between buckets as before
+```
+scheduleTask(predecessor, dependent, depType) -> { startDate, endDate }
+```
+
+This function computes the correct dates for each dependency type while preserving the dependent task's duration.
+
+### Edge Cases Handled
+- Circular dependency prevention (visited set)
+- Removing a dependency (setting to "none") -- no date changes needed
+- Changing dependency type on an existing link -- reschedules immediately
+- Chain cascading: A -> B -> C, changing A's dates propagates through B then C
 
