@@ -98,7 +98,7 @@ function TaskTimelineRow({
             const prog = hasSubTasks ? parentProgress : (task.progress || 0);
             const showProgress = (isLeafWorking || (hasSubTasks && parentProgress > 0)) && prog > 0;
             const barBg = showProgress
-              ? `linear-gradient(to right, ${statusColor} ${prog}%, ${statusColor}33 ${prog}%)`
+              ? `linear-gradient(to right, ${statusColor} ${prog}%, color-mix(in srgb, ${statusColor} 20%, transparent) ${prog}%)`
               : statusColor;
             return (
               <div
