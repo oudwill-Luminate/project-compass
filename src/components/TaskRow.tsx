@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addDays } from 'date-fns';
 import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield } from 'lucide-react';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
@@ -30,8 +30,19 @@ function getRolledUp(task: Task) {
   const subs = task.subTasks;
   const estimatedCost = subs.reduce((s, t) => s + t.estimatedCost, 0);
   const actualCost = subs.reduce((s, t) => s + t.actualCost, 0);
-  const startDate = subs.reduce((min, t) => t.startDate < min ? t.startDate : min, subs[0].startDate);
-  const endDate = subs.reduce((max, t) => t.endDate > max ? t.endDate : max, subs[0].endDate);
+
+  // Factor in buffer when computing rolled-up dates
+  const effectiveDates = subs.map(t => {
+    const s = t.bufferDays > 0 && t.bufferPosition === 'start'
+      ? format(addDays(parseISO(t.startDate), -t.bufferDays), 'yyyy-MM-dd')
+      : t.startDate;
+    const e = t.bufferDays > 0 && t.bufferPosition === 'end'
+      ? format(addDays(parseISO(t.endDate), t.bufferDays), 'yyyy-MM-dd')
+      : t.endDate;
+    return { s, e };
+  });
+  const startDate = effectiveDates.reduce((min, d) => d.s < min ? d.s : min, effectiveDates[0].s);
+  const endDate = effectiveDates.reduce((max, d) => d.e > max ? d.e : max, effectiveDates[0].e);
 
   let status: TaskStatus = 'not-started';
   if (subs.every(t => t.status === 'done')) status = 'done';
