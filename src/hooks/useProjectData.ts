@@ -175,6 +175,18 @@ export function useProjectData(projectId: string | undefined) {
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
     if (!project) return;
 
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: prev.buckets.map(b => ({
+          ...b,
+          tasks: b.tasks.map(t => t.id === taskId ? { ...t, ...updates } : t),
+        })),
+      };
+    });
+
     // Map frontend fields to DB columns
     const dbUpdates: Record<string, any> = {};
     if (updates.title !== undefined) dbUpdates.title = updates.title;
@@ -201,15 +213,12 @@ export function useProjectData(projectId: string | undefined) {
         daysDelta = differenceInDays(parseISO(updates.endDate), parseISO(oldTask.endDate));
       } else if (updates.startDate && updates.startDate !== oldTask.startDate) {
         daysDelta = differenceInDays(parseISO(updates.startDate), parseISO(oldTask.startDate));
-        // Also shift end date to maintain duration
         const duration = differenceInDays(parseISO(oldTask.endDate), parseISO(oldTask.startDate));
         dbUpdates.end_date = format(addDays(parseISO(updates.startDate), duration), 'yyyy-MM-dd');
       }
 
-      // Update the main task
       await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
-      // Auto-schedule dependents
       if (daysDelta !== 0) {
         const visited = new Set<string>();
         const shiftDependents = async (parentId: string, delta: number) => {
@@ -232,6 +241,7 @@ export function useProjectData(projectId: string | undefined) {
 
   const updateContingency = useCallback(async (percent: number) => {
     if (!projectId) return;
+    setProject(prev => prev ? { ...prev, contingencyPercent: percent } : prev);
     await supabase.from('projects').update({ contingency_percent: percent }).eq('id', projectId);
   }, [projectId]);
 
@@ -239,17 +249,42 @@ export function useProjectData(projectId: string | undefined) {
     if (!projectId) return;
     const position = project?.buckets.length ?? 0;
     const color = COLORS[position % COLORS.length];
+    const tempId = `temp-${Date.now()}`;
+
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: [...prev.buckets, { id: tempId, name, color, collapsed: false, tasks: [] }],
+      };
+    });
+
     const { error } = await supabase.from('buckets').insert({ project_id: projectId, name, color, position });
     if (error) console.error('addBucket error:', error);
   }, [projectId, project]);
 
   const updateBucket = useCallback(async (bucketId: string, updates: { name?: string; color?: string }) => {
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: prev.buckets.map(b => b.id === bucketId ? { ...b, ...updates } : b),
+      };
+    });
+
     const { error } = await supabase.from('buckets').update(updates).eq('id', bucketId);
     if (error) console.error('updateBucket error:', error);
   }, []);
 
   const deleteBucket = useCallback(async (bucketId: string) => {
-    // Delete all tasks in the bucket first
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return { ...prev, buckets: prev.buckets.filter(b => b.id !== bucketId) };
+    });
+
     await supabase.from('tasks').delete().eq('bucket_id', bucketId);
     const { error } = await supabase.from('buckets').delete().eq('id', bucketId);
     if (error) console.error('deleteBucket error:', error);
@@ -261,6 +296,36 @@ export function useProjectData(projectId: string | undefined) {
     const position = bucket?.tasks.length ?? 0;
     const today = format(new Date(), 'yyyy-MM-dd');
     const endDate = format(addDays(new Date(), 7), 'yyyy-MM-dd');
+    const tempId = `temp-${Date.now()}`;
+
+    const newTask: Task = {
+      id: tempId,
+      title,
+      status: 'not-started',
+      priority: 'medium',
+      owner: toOwner(user.id),
+      startDate: today,
+      endDate,
+      estimatedCost: 0,
+      actualCost: 0,
+      dependsOn: null,
+      dependencyType: 'FS',
+      flaggedAsRisk: false,
+      riskImpact: 1,
+      riskProbability: 1,
+    };
+
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: prev.buckets.map(b =>
+          b.id === bucketId ? { ...b, tasks: [...b.tasks, newTask] } : b
+        ),
+      };
+    });
+
     await supabase.from('tasks').insert({
       bucket_id: bucketId,
       title,
@@ -269,15 +334,49 @@ export function useProjectData(projectId: string | undefined) {
       start_date: today,
       end_date: endDate,
     });
-  }, [user, project]);
+  }, [user, project, toOwner]);
 
   const moveTask = useCallback(async (taskId: string, newBucketId: string, newPosition: number) => {
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      let movedTask: Task | undefined;
+      const bucketsWithout = prev.buckets.map(b => {
+        const idx = b.tasks.findIndex(t => t.id === taskId);
+        if (idx !== -1) {
+          movedTask = b.tasks[idx];
+          return { ...b, tasks: [...b.tasks.slice(0, idx), ...b.tasks.slice(idx + 1)] };
+        }
+        return b;
+      });
+      if (!movedTask) return prev;
+      return {
+        ...prev,
+        buckets: bucketsWithout.map(b =>
+          b.id === newBucketId
+            ? { ...b, tasks: [...b.tasks.slice(0, newPosition), movedTask!, ...b.tasks.slice(newPosition)] }
+            : b
+        ),
+      };
+    });
+
     const { error } = await supabase.from('tasks').update({ bucket_id: newBucketId, position: newPosition }).eq('id', taskId);
     if (error) console.error('moveTask error:', error);
-    else await fetchAll(); // Force refresh after move
-  }, [fetchAll]);
+  }, []);
 
   const deleteTask = useCallback(async (taskId: string) => {
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: prev.buckets.map(b => ({
+          ...b,
+          tasks: b.tasks.filter(t => t.id !== taskId),
+        })),
+      };
+    });
+
     const { error } = await supabase.from('tasks').delete().eq('id', taskId);
     if (error) console.error('deleteTask error:', error);
   }, []);
