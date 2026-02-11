@@ -30,8 +30,10 @@ function getRolledUp(task: Task) {
   }
 
   const subs = task.subTasks;
-  const estimatedCost = subs.reduce((s, t) => s + t.estimatedCost, 0);
-  const actualCost = subs.reduce((s, t) => s + t.actualCost, 0);
+  const subEstimated = subs.reduce((s, t) => s + t.estimatedCost, 0);
+  const subActual = subs.reduce((s, t) => s + t.actualCost, 0);
+  const estimatedCost = subEstimated > 0 ? subEstimated : task.estimatedCost;
+  const actualCost = subActual > 0 ? subActual : task.actualCost;
 
   const effectiveDates = subs.map(t => {
     const s = t.bufferDays > 0 && t.bufferPosition === 'start'
