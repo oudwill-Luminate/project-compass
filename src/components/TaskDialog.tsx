@@ -338,7 +338,27 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               <Label className="text-xs font-medium">Depends On</Label>
               <Select
                 value={formData.dependsOn || 'none'}
-                onValueChange={v => setFormData({ ...formData, dependsOn: v === 'none' ? null : v })}
+                onValueChange={v => {
+                  const newDep = v === 'none' ? null : v;
+                  if (newDep) {
+                    // Circular dependency detection
+                    const allTasks = getAllTasks();
+                    const visited = new Set<string>([task.id]);
+                    let current: string | null = newDep;
+                    let circular = false;
+                    while (current) {
+                      if (visited.has(current)) { circular = true; break; }
+                      visited.add(current);
+                      const t = allTasks.find(t => t.id === current);
+                      current = t?.dependsOn || null;
+                    }
+                    if (circular) {
+                      toast({ title: 'Error: Circular Dependency', description: 'This dependency would create a loop. Please choose a different task.', variant: 'destructive' });
+                      return;
+                    }
+                  }
+                  setFormData({ ...formData, dependsOn: newDep });
+                }}
               >
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ProjectProvider, useProject } from '@/context/ProjectContext';
@@ -7,6 +8,7 @@ import { TimelineView } from '@/components/TimelineView';
 import { RiskRegistry } from '@/components/RiskRegistry';
 import { WorkloadView } from '@/components/WorkloadView';
 import { ProjectSettings } from '@/components/ProjectSettings';
+import { TaskSearchCommand } from '@/components/TaskSearchCommand';
 import { Loader2 } from 'lucide-react';
 
 function ProjectContent() {
@@ -42,6 +44,18 @@ function ProjectContent() {
 
 export default function Index() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   if (!projectId) return <Navigate to="/" replace />;
 
@@ -50,6 +64,7 @@ export default function Index() {
       <div className="flex min-h-screen w-full bg-background">
         <Sidebar />
         <ProjectContent />
+        <TaskSearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
       </div>
     </ProjectProvider>
   );
