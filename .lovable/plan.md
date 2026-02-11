@@ -1,36 +1,57 @@
 
 
-## Fix: Budget Amounts Not Displaying on Task Rows
+## Fix Risk Management: Labels, Description, and Registry Display
 
-### Problem
+### Problems Found
 
-The estimated cost column shows **$0** for all tasks, but the subtotal shows **$10,000**. This happens because:
+1. **No labels on risk scores**: The Impact and Probability dropdowns show only "1, 2, 3, 4, 5" with no indication of what each level means (e.g., "Negligible", "Rare").
 
-- The "Plumbing" parent task has $10,000 stored in the database
-- Its subtasks (Water Lines, Drainage) both have $0
-- The `getRolledUp()` function in `TaskRow.tsx` replaces the parent's cost with the **sum of subtask costs** (0 + 0 = 0)
-- The subtotal uses a different function (`flattenTasks`) that includes the parent's own $10,000, creating a mismatch
+2. **No risk description field**: There is no text box to describe the risk impact. The database also lacks a column for this.
+
+3. **Risks not showing in Risk Registry**: The Risk Registry only checks top-level tasks for the `flaggedAsRisk` flag. If a subtask is flagged as a risk, it is invisible to the registry because it never looks inside `subTasks` arrays.
 
 ### Solution
 
-Update `getRolledUp()` in `src/components/TaskRow.tsx` so that when subtask costs sum to zero, it falls back to the parent task's own stored cost. This way a budget set on a parent task is still visible until costs are distributed to subtasks.
+**1. Database migration -- add `risk_description` column**
 
-### Changes
+Add a `risk_description` text column (nullable, default empty string) to the `tasks` table.
 
-**File: `src/components/TaskRow.tsx`**
+**2. Update the Task type**
 
-In the `getRolledUp` function (lines 31-34), change the cost calculation:
+Add `riskDescription: string` to the `Task` interface in `src/types/project.ts`.
 
-```typescript
-// Before:
-const estimatedCost = subs.reduce((s, t) => s + t.estimatedCost, 0);
-const actualCost = subs.reduce((s, t) => s + t.actualCost, 0);
+**3. Update data layer (`src/hooks/useProjectData.ts`)**
 
-// After:
-const subEstimated = subs.reduce((s, t) => s + t.estimatedCost, 0);
-const subActual = subs.reduce((s, t) => s + t.actualCost, 0);
-const estimatedCost = subEstimated > 0 ? subEstimated : task.estimatedCost;
-const actualCost = subActual > 0 ? subActual : task.actualCost;
-```
+- Read `risk_description` from the database into `riskDescription` on the Task object
+- Write `riskDescription` back as `risk_description` in `updateTask`
 
-This is a small, targeted fix -- only 2 lines change in one file.
+**4. Improve TaskDialog risk section (`src/components/TaskDialog.tsx`)**
+
+- Change the Impact dropdown options from plain numbers to labeled options:
+  - 1 -- Negligible
+  - 2 -- Minor
+  - 3 -- Moderate
+  - 4 -- Major
+  - 5 -- Severe
+- Change the Probability dropdown options similarly:
+  - 1 -- Rare
+  - 2 -- Unlikely
+  - 3 -- Possible
+  - 4 -- Likely
+  - 5 -- Almost Certain
+- Add a **Risk Description** textarea below the dropdowns for describing the risk impact
+
+**5. Fix Risk Registry to include subtasks (`src/components/RiskRegistry.tsx`)**
+
+Replace the shallow `.filter()` on `b.tasks` with a recursive flatten that searches through all subtask levels, so any flagged task -- regardless of nesting depth -- appears in the registry and on the matrix.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| Database migration | Add `risk_description` text column to `tasks` |
+| `src/types/project.ts` | Add `riskDescription: string` to `Task` interface |
+| `src/hooks/useProjectData.ts` | Map `risk_description` field in read/write |
+| `src/components/TaskDialog.tsx` | Add labels to risk dropdowns, add risk description textarea |
+| `src/components/RiskRegistry.tsx` | Flatten all tasks recursively to find flagged risks at any depth |
+
