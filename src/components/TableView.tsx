@@ -88,6 +88,7 @@ export function TableView() {
     bufferPosition: 'end',
     riskImpact: 1,
     riskProbability: 1,
+    riskDescription: '',
     parentTaskId: null,
     responsible: null,
     progress: 0,

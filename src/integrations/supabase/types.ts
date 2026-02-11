@@ -163,6 +163,7 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           progress: number
           responsible: string | null
+          risk_description: string
           risk_impact: number
           risk_probability: number
           start_date: string
@@ -188,6 +189,7 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           progress?: number
           responsible?: string | null
+          risk_description?: string
           risk_impact?: number
           risk_probability?: number
           start_date?: string
@@ -213,6 +215,7 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           progress?: number
           responsible?: string | null
+          risk_description?: string
           risk_impact?: number
           risk_probability?: number
           start_date?: string

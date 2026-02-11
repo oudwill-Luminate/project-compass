@@ -43,6 +43,7 @@ interface TaskRow {
   buffer_position: string;
   responsible: string | null;
   progress: number;
+  risk_description: string;
 }
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
@@ -72,6 +73,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       flaggedAsRisk: t.flagged_as_risk,
       riskImpact: t.risk_impact,
       riskProbability: t.risk_probability,
+      riskDescription: t.risk_description || '',
       parentTaskId: t.parent_task_id,
       bufferDays: t.buffer_days || 0,
       bufferPosition: (t.buffer_position === 'start' ? 'start' : 'end') as 'start' | 'end',
@@ -362,6 +364,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.flaggedAsRisk !== undefined) dbUpdates.flagged_as_risk = updates.flaggedAsRisk;
     if (updates.riskImpact !== undefined) dbUpdates.risk_impact = updates.riskImpact;
     if (updates.riskProbability !== undefined) dbUpdates.risk_probability = updates.riskProbability;
+    if (updates.riskDescription !== undefined) dbUpdates.risk_description = updates.riskDescription;
     if (updates.parentTaskId !== undefined) dbUpdates.parent_task_id = updates.parentTaskId;
     if (updates.bufferDays !== undefined) dbUpdates.buffer_days = updates.bufferDays;
     if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
@@ -513,6 +516,7 @@ export function useProjectData(projectId: string | undefined) {
       progress: 0,
       riskImpact: 1,
       riskProbability: 1,
+      riskDescription: '',
       parentTaskId: parentTaskId || null,
       subTasks: [],
     };

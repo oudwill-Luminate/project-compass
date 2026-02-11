@@ -24,6 +24,23 @@ import {
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Textarea } from '@/components/ui/textarea';
+
+const RISK_IMPACT_LABELS: Record<number, string> = {
+  1: 'Negligible',
+  2: 'Minor',
+  3: 'Moderate',
+  4: 'Major',
+  5: 'Severe',
+};
+
+const RISK_PROBABILITY_LABELS: Record<number, string> = {
+  1: 'Rare',
+  2: 'Unlikely',
+  3: 'Possible',
+  4: 'Likely',
+  5: 'Almost Certain',
+};
 
 const DEPENDENCY_LABELS: Record<DependencyType, string> = {
   'FS': 'Finish-to-Start',
@@ -356,34 +373,45 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
 
           {/* Risk Details */}
           {formData.flaggedAsRisk && (
-            <div className="grid grid-cols-2 gap-4 p-3 rounded-lg bg-destructive/5 border border-destructive/10">
-              <div>
-                <Label className="text-xs font-medium">Risk Impact (1-5)</Label>
-                <Select
-                  value={String(formData.riskImpact)}
-                  onValueChange={v => setFormData({ ...formData, riskImpact: Number(v) })}
-                >
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    {[1, 2, 3, 4, 5].map(n => (
-                      <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <div className="space-y-3 p-3 rounded-lg bg-destructive/5 border border-destructive/10">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-medium">Risk Impact</Label>
+                  <Select
+                    value={String(formData.riskImpact)}
+                    onValueChange={v => setFormData({ ...formData, riskImpact: Number(v) })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {[1, 2, 3, 4, 5].map(n => (
+                        <SelectItem key={n} value={String(n)}>{n} — {RISK_IMPACT_LABELS[n]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs font-medium">Risk Probability</Label>
+                  <Select
+                    value={String(formData.riskProbability)}
+                    onValueChange={v => setFormData({ ...formData, riskProbability: Number(v) })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {[1, 2, 3, 4, 5].map(n => (
+                        <SelectItem key={n} value={String(n)}>{n} — {RISK_PROBABILITY_LABELS[n]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div>
-                <Label className="text-xs font-medium">Risk Probability (1-5)</Label>
-                <Select
-                  value={String(formData.riskProbability)}
-                  onValueChange={v => setFormData({ ...formData, riskProbability: Number(v) })}
-                >
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    {[1, 2, 3, 4, 5].map(n => (
-                      <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs font-medium">Risk Description</Label>
+                <Textarea
+                  value={formData.riskDescription || ''}
+                  onChange={e => setFormData({ ...formData, riskDescription: e.target.value })}
+                  placeholder="Describe the risk impact and mitigation strategy..."
+                  className="mt-1 min-h-[60px] text-xs"
+                />
               </div>
             </div>
           )}
