@@ -3,10 +3,19 @@ import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
 import { TaskDialog } from './TaskDialog';
 import { Task } from '@/types/project';
-import { AlertTriangle, ShieldAlert, ChevronDown, Pencil, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ChevronDown, Pencil, TrendingUp, TrendingDown, Minus, Plus, Trash2, Shield, LifeBuoy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+
+interface RiskAction {
+  id: string;
+  task_id: string;
+  action_type: 'mitigation' | 'contingency';
+  description: string;
+}
 
 const RISK_LABELS = {
   impact: ['', 'Negligible', 'Minor', 'Moderate', 'Major', 'Severe'],
@@ -34,6 +43,8 @@ export function RiskRegistry() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [previousCounts, setPreviousCounts] = useState<{ Critical: number; High: number; Medium: number; Low: number } | null>(null);
+  const [riskActions, setRiskActions] = useState<Record<string, RiskAction[]>>({});
+  const [newActionText, setNewActionText] = useState<Record<string, string>>({});
 
   function flattenAllTasks(tasks: typeof project.buckets[0]['tasks']): typeof project.buckets[0]['tasks'] {
     const result: typeof project.buckets[0]['tasks'] = [];
@@ -70,6 +81,51 @@ export function RiskRegistry() {
       else next.add(id);
       return next;
     });
+  };
+
+  // Fetch risk actions for all flagged tasks
+  const fetchRiskActions = useCallback(async () => {
+    const taskIds = flaggedTasks.map(t => t.id);
+    if (taskIds.length === 0) return;
+    const { data } = await supabase
+      .from('risk_actions')
+      .select('*')
+      .in('task_id', taskIds)
+      .order('created_at');
+    if (data) {
+      const grouped: Record<string, RiskAction[]> = {};
+      data.forEach((a: any) => {
+        if (!grouped[a.task_id]) grouped[a.task_id] = [];
+        grouped[a.task_id].push(a);
+      });
+      setRiskActions(grouped);
+    }
+  }, [flaggedTasks.length, project.id]);
+
+  useEffect(() => {
+    fetchRiskActions();
+  }, [fetchRiskActions]);
+
+  const addAction = async (taskId: string, actionType: 'mitigation' | 'contingency') => {
+    const text = newActionText[`${taskId}-${actionType}`]?.trim();
+    if (!text) return;
+    await supabase.from('risk_actions').insert({
+      task_id: taskId,
+      action_type: actionType,
+      description: text,
+    });
+    setNewActionText(prev => ({ ...prev, [`${taskId}-${actionType}`]: '' }));
+    fetchRiskActions();
+  };
+
+  const deleteAction = async (actionId: string) => {
+    await supabase.from('risk_actions').delete().eq('id', actionId);
+    fetchRiskActions();
+  };
+
+  const updateActionText = async (actionId: string, description: string) => {
+    await supabase.from('risk_actions').update({ description }).eq('id', actionId);
+    fetchRiskActions();
   };
 
   // Compute current counts
@@ -260,6 +316,9 @@ export function RiskRegistry() {
                 const risk = getRiskLevel(task.riskImpact, task.riskProbability);
                 const isExpanded = expandedIds.has(task.id);
                 const hasDescription = !!task.riskDescription?.trim();
+                const taskActions = riskActions[task.id] || [];
+                const mitigations = taskActions.filter(a => a.action_type === 'mitigation');
+                const contingencies = taskActions.filter(a => a.action_type === 'contingency');
 
                 return (
                   <div
@@ -269,12 +328,8 @@ export function RiskRegistry() {
                     <div className="flex items-center gap-4 p-4">
                       {/* Expand toggle */}
                       <button
-                        onClick={() => hasDescription && toggleExpanded(task.id)}
-                        className={cn(
-                          "shrink-0 transition-transform",
-                          hasDescription ? "cursor-pointer text-muted-foreground hover:text-foreground" : "text-transparent cursor-default"
-                        )}
-                        disabled={!hasDescription}
+                        onClick={() => toggleExpanded(task.id)}
+                        className="shrink-0 cursor-pointer text-muted-foreground hover:text-foreground transition-transform"
                       >
                         <ChevronDown className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-180")} />
                       </button>
@@ -304,6 +359,14 @@ export function RiskRegistry() {
                           <span className="font-bold" style={{ color: risk.cssColor }}>
                             {risk.label} Risk
                           </span>
+                          {(mitigations.length > 0 || contingencies.length > 0) && (
+                            <>
+                              <span className="opacity-30">•</span>
+                              <span className="text-muted-foreground/70">
+                                {mitigations.length} mitigation{mitigations.length !== 1 ? 's' : ''}, {contingencies.length} contingenc{contingencies.length !== 1 ? 'ies' : 'y'}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                       <OwnerAvatar owner={task.owner} />
@@ -322,9 +385,9 @@ export function RiskRegistry() {
                       </button>
                     </div>
 
-                    {/* Collapsible description */}
+                    {/* Collapsible details: description + mitigation + contingency */}
                     <AnimatePresence>
-                      {isExpanded && hasDescription && (
+                      {isExpanded && (
                         <motion.div
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: 'auto', opacity: 1 }}
@@ -332,10 +395,120 @@ export function RiskRegistry() {
                           transition={{ duration: 0.15 }}
                           className="overflow-hidden"
                         >
-                          <div className="px-4 pb-4 pl-[4.25rem]">
-                            <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap bg-muted/30 rounded-lg p-3 border border-border/40">
-                              {task.riskDescription}
-                            </p>
+                          <div className="px-4 pb-4 pl-[4.25rem] space-y-4">
+                            {/* Risk description */}
+                            {hasDescription && (
+                              <div>
+                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Description</p>
+                                <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap bg-muted/30 rounded-lg p-3 border border-border/40">
+                                  {task.riskDescription}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Mitigation Strategies */}
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Shield className="w-3.5 h-3.5 text-muted-foreground" />
+                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Mitigation Strategies</p>
+                              </div>
+                              {mitigations.length > 0 && (
+                                <div className="space-y-1.5 mb-2">
+                                  {mitigations.map(action => (
+                                    <div key={action.id} className="flex items-start gap-2 group">
+                                      <span className="text-xs text-muted-foreground mt-0.5">•</span>
+                                      <input
+                                        className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground focus:bg-muted/30 rounded px-1 py-0.5 -ml-1"
+                                        defaultValue={action.description}
+                                        onBlur={e => {
+                                          if (e.target.value !== action.description) {
+                                            updateActionText(action.id, e.target.value);
+                                          }
+                                        }}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                                        }}
+                                      />
+                                      <button
+                                        onClick={() => deleteAction(action.id)}
+                                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0 p-0.5"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  placeholder="Add mitigation strategy..."
+                                  className="h-7 text-xs flex-1"
+                                  value={newActionText[`${task.id}-mitigation`] || ''}
+                                  onChange={e => setNewActionText(prev => ({ ...prev, [`${task.id}-mitigation`]: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') addAction(task.id, 'mitigation'); }}
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 shrink-0"
+                                  onClick={() => addAction(task.id, 'mitigation')}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Contingency Plans */}
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <LifeBuoy className="w-3.5 h-3.5 text-muted-foreground" />
+                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Contingency Plans</p>
+                              </div>
+                              {contingencies.length > 0 && (
+                                <div className="space-y-1.5 mb-2">
+                                  {contingencies.map(action => (
+                                    <div key={action.id} className="flex items-start gap-2 group">
+                                      <span className="text-xs text-muted-foreground mt-0.5">•</span>
+                                      <input
+                                        className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground focus:bg-muted/30 rounded px-1 py-0.5 -ml-1"
+                                        defaultValue={action.description}
+                                        onBlur={e => {
+                                          if (e.target.value !== action.description) {
+                                            updateActionText(action.id, e.target.value);
+                                          }
+                                        }}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                                        }}
+                                      />
+                                      <button
+                                        onClick={() => deleteAction(action.id)}
+                                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0 p-0.5"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  placeholder="Add contingency plan..."
+                                  className="h-7 text-xs flex-1"
+                                  value={newActionText[`${task.id}-contingency`] || ''}
+                                  onChange={e => setNewActionText(prev => ({ ...prev, [`${task.id}-contingency`]: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') addAction(task.id, 'contingency'); }}
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 shrink-0"
+                                  onClick={() => addAction(task.id, 'contingency')}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            </div>
                           </div>
                         </motion.div>
                       )}
