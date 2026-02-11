@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useProject } from '@/context/ProjectContext';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -6,16 +6,131 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Progress } from '@/components/ui/progress';
-import { FileText, Target, Plus, Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { FileText, Target, Plus, Trash2, Activity } from 'lucide-react';
 import { toast } from 'sonner';
+import { computeProjectHealth, type HealthStatus } from '@/lib/projectHealth';
+import { computeCriticalPath } from '@/lib/criticalPath';
 
+/* ── Lightweight Markdown → React renderer ── */
+function renderMarkdown(md: string) {
+  const lines = md.split('\n');
+  const elements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+  let key = 0;
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={key++} className="list-disc list-inside space-y-1 text-sm text-foreground">
+          {listItems.map((li, i) => <li key={i}>{inlineFormat(li)}</li>)}
+        </ul>,
+      );
+      listItems = [];
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trimEnd();
+
+    // Headings
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.*)/);
+    if (headingMatch) {
+      flushList();
+      const level = headingMatch[1].length;
+      const text = headingMatch[2];
+      const Tag = (`h${level}` as keyof JSX.IntrinsicElements);
+      const sizes: Record<number, string> = {
+        1: 'text-xl font-bold',
+        2: 'text-lg font-semibold',
+        3: 'text-base font-semibold',
+        4: 'text-sm font-semibold',
+      };
+      elements.push(<Tag key={key++} className={`${sizes[level]} text-foreground mt-3 mb-1`}>{inlineFormat(text)}</Tag>);
+      continue;
+    }
+
+    // List items
+    if (/^[-*]\s+/.test(trimmed)) {
+      listItems.push(trimmed.replace(/^[-*]\s+/, ''));
+      continue;
+    }
+
+    // Empty line
+    if (trimmed === '') {
+      flushList();
+      continue;
+    }
+
+    // Paragraph
+    flushList();
+    elements.push(<p key={key++} className="text-sm text-foreground leading-relaxed">{inlineFormat(trimmed)}</p>);
+  }
+  flushList();
+  return elements;
+}
+
+function inlineFormat(text: string): React.ReactNode {
+  // Bold + italic combined, then bold, then italic, then inline code
+  const parts: React.ReactNode[] = [];
+  const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let i = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    if (match[2]) parts.push(<strong key={i}><em>{match[2]}</em></strong>);
+    else if (match[3]) parts.push(<strong key={i}>{match[3]}</strong>);
+    else if (match[4]) parts.push(<em key={i}>{match[4]}</em>);
+    else if (match[5]) parts.push(<code key={i} className="px-1 py-0.5 rounded bg-muted text-xs font-mono">{match[5]}</code>);
+    last = match.index + match[0].length;
+    i++;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 1 ? parts[0] : parts;
+}
+
+/* ── Health indicator ── */
+const HEALTH_COLORS: Record<HealthStatus, string> = {
+  green: 'bg-green-500',
+  yellow: 'bg-yellow-500',
+  red: 'bg-red-500',
+};
+const HEALTH_LABELS: Record<HealthStatus, string> = {
+  green: 'On Track',
+  yellow: 'At Risk',
+  red: 'Critical',
+};
+
+function TrafficLight({ label, status }: { label: string; status: HealthStatus }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className={`w-3 h-3 rounded-full ${HEALTH_COLORS[status]} shadow-sm`} />
+      <div>
+        <p className="text-xs font-medium text-foreground">{label}</p>
+        <p className="text-[11px] text-muted-foreground">{HEALTH_LABELS[status]}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main component ── */
 export function ProjectOverview() {
-  const { project, updateCharter, goals, addGoal, updateGoal, deleteGoal } = useProject();
+  const { project, updateCharter, goals, addGoal, updateGoal, deleteGoal, getAllTasks } = useProject();
   const [charter, setCharter] = useState(project.charterMarkdown);
   const [saving, setSaving] = useState(false);
   const [newGoalTitle, setNewGoalTitle] = useState('');
 
   const hasCharterChanges = charter !== project.charterMarkdown;
+
+  const allTasks = useMemo(() => getAllTasks(), [getAllTasks]);
+
+  const health = useMemo(() => {
+    const { criticalTaskIds } = computeCriticalPath(allTasks);
+    return computeProjectHealth(allTasks, criticalTaskIds);
+  }, [allTasks]);
 
   const handleSaveCharter = useCallback(async () => {
     setSaving(true);
@@ -49,22 +164,51 @@ export function ProjectOverview() {
           </div>
           <div>
             <h2 className="text-xl font-bold text-foreground">Project Overview</h2>
-            <p className="text-sm text-muted-foreground">Charter & strategic goals</p>
+            <p className="text-sm text-muted-foreground">Charter, health & strategic goals</p>
           </div>
         </div>
 
-        {/* Project Charter */}
+        {/* Project Health Widget */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Project Health
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-8">
+              <TrafficLight label="Schedule" status={health.schedule} />
+              <TrafficLight label="Budget" status={health.budget} />
+              <TrafficLight label="Risk" status={health.risk} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Project Charter with Write/Preview */}
         <div className="space-y-3">
           <Label className="text-sm font-semibold">Project Charter</Label>
-          <p className="text-xs text-muted-foreground">
-            Describe the project scope, objectives, stakeholders, and constraints using Markdown.
-          </p>
-          <Textarea
-            value={charter}
-            onChange={e => setCharter(e.target.value)}
-            placeholder="# Project Charter&#10;&#10;## Objectives&#10;- ...&#10;&#10;## Scope&#10;...&#10;&#10;## Stakeholders&#10;..."
-            className="min-h-[200px] font-mono text-sm"
-          />
+          <Tabs defaultValue="write">
+            <TabsList className="h-8">
+              <TabsTrigger value="write" className="text-xs px-3 py-1">Write</TabsTrigger>
+              <TabsTrigger value="preview" className="text-xs px-3 py-1">Preview</TabsTrigger>
+            </TabsList>
+            <TabsContent value="write">
+              <Textarea
+                value={charter}
+                onChange={e => setCharter(e.target.value)}
+                placeholder="# Project Charter&#10;&#10;## Objectives&#10;- ...&#10;&#10;## Scope&#10;...&#10;&#10;## Stakeholders&#10;..."
+                className="min-h-[200px] font-mono text-sm"
+              />
+            </TabsContent>
+            <TabsContent value="preview">
+              <div className="min-h-[200px] rounded-md border border-input bg-background p-4 space-y-2">
+                {charter.trim()
+                  ? renderMarkdown(charter)
+                  : <p className="text-sm text-muted-foreground italic">Nothing to preview</p>}
+              </div>
+            </TabsContent>
+          </Tabs>
           <Button
             onClick={handleSaveCharter}
             disabled={!hasCharterChanges || saving}
