@@ -93,6 +93,38 @@ export type Database = {
           },
         ]
       }
+      communication_logs: {
+        Row: {
+          created_at: string
+          id: string
+          logged_at: string
+          note: string
+          stakeholder_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          logged_at?: string
+          note?: string
+          stakeholder_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          logged_at?: string
+          note?: string
+          stakeholder_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "communication_logs_stakeholder_id_fkey"
+            columns: ["stakeholder_id"]
+            isOneToOne: false
+            referencedRelation: "stakeholders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -315,11 +347,13 @@ export type Database = {
           engagement: Database["public"]["Enums"]["engagement_level"]
           id: string
           interest: number
+          last_communication_date: string | null
           name: string
           position: number
           power: number
           project_id: string
           role: string
+          sentiment: string
           updated_at: string
         }
         Insert: {
@@ -328,11 +362,13 @@ export type Database = {
           engagement?: Database["public"]["Enums"]["engagement_level"]
           id?: string
           interest?: number
+          last_communication_date?: string | null
           name?: string
           position?: number
           power?: number
           project_id: string
           role?: string
+          sentiment?: string
           updated_at?: string
         }
         Update: {
@@ -341,11 +377,13 @@ export type Database = {
           engagement?: Database["public"]["Enums"]["engagement_level"]
           id?: string
           interest?: number
+          last_communication_date?: string | null
           name?: string
           position?: number
           power?: number
           project_id?: string
           role?: string
+          sentiment?: string
           updated_at?: string
         }
         Relationships: [
@@ -493,6 +531,10 @@ export type Database = {
       }
       get_project_id_from_bucket: {
         Args: { _bucket_id: string }
+        Returns: string
+      }
+      get_project_id_from_stakeholder: {
+        Args: { _stakeholder_id: string }
         Returns: string
       }
       get_project_id_from_task: { Args: { _task_id: string }; Returns: string }
