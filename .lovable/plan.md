@@ -1,98 +1,51 @@
 
 
-## Baseline Date Tracking for Slippage Visibility
+## Quality Checklist Feature
 
 ### Overview
+Add a "Quality Checklist" section to the Task Dialog where users can add, check off, and remove checklist items. When a task is marked as 100% complete (or status set to "Done"), all checklist items must be checked -- otherwise show a warning and prevent completion.
 
-Add `baseline_start_date` and `baseline_end_date` columns to the tasks table, a "Set Baseline" button in the TableView header, and a faint gray baseline bar behind each task bar in the TimelineView to visualize schedule slippage.
+### Database Changes
 
----
+**New table: `checklist_items`**
+- `id` (uuid, PK, default gen_random_uuid())
+- `task_id` (uuid, NOT NULL, FK to tasks.id ON DELETE CASCADE)
+- `label` (text, NOT NULL)
+- `checked` (boolean, NOT NULL, default false)
+- `position` (integer, NOT NULL, default 0)
+- `created_at` (timestamptz, default now())
 
-### 1. Database Migration
+**RLS policies** (using existing helper functions):
+- SELECT: `is_project_member(auth.uid(), get_project_id_from_task(task_id))`
+- INSERT/UPDATE/DELETE: `is_project_editor(auth.uid(), get_project_id_from_task(task_id))`
 
-Add two nullable date columns to the `tasks` table:
+### UI Changes (TaskDialog.tsx)
 
-```sql
-ALTER TABLE public.tasks
-  ADD COLUMN baseline_start_date date,
-  ADD COLUMN baseline_end_date date;
+1. **New "Quality Checklist" section** added between the Contingency Buffer and Risk Flag sections:
+   - Header with label and item count (e.g., "Quality Checklist (2/5)")
+   - List of items, each with a checkbox and label text
+   - A delete button (X icon) on each item to remove it
+   - An input + "Add" button at the bottom to add new items
+
+2. **Completion guard logic** in the save handler:
+   - When status is set to "Done" or progress slider reaches 100%, check if all checklist items are checked
+   - If unchecked items exist, show a toast warning: "Cannot mark as complete -- X checklist items are not done"
+   - Prevent the save from going through until all items are checked or the user lowers the progress/changes status
+
+3. **Data fetching**: Load checklist items from the database when the dialog opens; save changes (add/remove/toggle) immediately via Supabase calls so items persist even if the user cancels the dialog.
+
+### Technical Details
+
+```text
+TaskDialog
+  +-- useEffect: fetch checklist_items WHERE task_id = task.id
+  +-- checklistItems state: { id, label, checked, position }[]
+  +-- addItem(label): INSERT into checklist_items, update local state
+  +-- toggleItem(id): UPDATE checked in DB, update local state
+  +-- removeItem(id): DELETE from DB, update local state
+  +-- handleSave: if status=done or progress=100, verify all checked
 ```
 
-Both are nullable because tasks won't have a baseline until the user explicitly sets one.
-
----
-
-### 2. Update Type Definitions
-
-**File: `src/types/project.ts`**
-
-Add to the `Task` interface:
-- `baselineStartDate: string | null`
-- `baselineEndDate: string | null`
-
----
-
-### 3. Update Data Layer
-
-**File: `src/hooks/useProjectData.ts`**
-
-- Update `TaskRow` interface to include `baseline_start_date` and `baseline_end_date`
-- Update `buildTaskTree` to map these new fields into the `Task` object
-- Update `updateTask` to handle `baselineStartDate` / `baselineEndDate` mapping to DB columns
-- Add a new `setBaseline` function that bulk-updates all tasks in the project, copying each task's current `start_date` / `end_date` into `baseline_start_date` / `baseline_end_date`
-
-**File: `src/context/ProjectContext.tsx`**
-
-- Expose `setBaseline` in the context type and provider
-
----
-
-### 4. "Set Baseline" Button in TableView
-
-**File: `src/components/TableView.tsx`**
-
-- Add a "Set Baseline" button next to the existing "Columns" settings button in the header area
-- Clicking it calls `setBaseline()` from context, which snapshots all current dates
-- Use a confirmation dialog or a simple `confirm()` prompt since this overwrites any previous baseline
-- Use a `Target` or `Flag` icon from lucide-react for visual identification
-
----
-
-### 5. Baseline Bar in TimelineView
-
-**File: `src/components/TimelineView.tsx`**
-
-- In the `TaskTimelineRow` component, after rendering the main task bar, render a second bar if `task.baselineStartDate` and `task.baselineEndDate` are set
-- The baseline bar will be:
-  - Positioned using `getTaskPosition(baselineStartDate, baselineEndDate)`
-  - Styled as a faint gray bar (`bg-muted-foreground/20`) with a dashed or solid border
-  - Placed slightly below the main bar (offset `top` by ~2px) so it peeks out underneath, making slippage visually obvious
-  - Thinner height (`h-5` vs the main bar's `h-7`) and `z-0` so the active bar sits on top
-- Add a legend entry for "Baseline" in the timeline header alongside the existing Task/Buffer/Today legend items
-
----
-
-### 6. Update Task Template
-
-**File: `src/components/TableView.tsx`**
-
-- Add `baselineStartDate: null` and `baselineEndDate: null` to `newTaskTemplate`
-
-**File: `src/data/mockData.ts`**
-
-- Add the new fields to any mock task definitions
-
----
-
-### Files Changed
-
-| File | Change |
-|------|--------|
-| `supabase/migrations/...` | Add `baseline_start_date` and `baseline_end_date` columns |
-| `src/types/project.ts` | Add baseline fields to `Task` interface |
-| `src/hooks/useProjectData.ts` | Map new columns, add `setBaseline` bulk function |
-| `src/context/ProjectContext.tsx` | Expose `setBaseline` in context |
-| `src/components/TableView.tsx` | Add "Set Baseline" button, update task template |
-| `src/components/TimelineView.tsx` | Render gray baseline bar underneath active bar, add legend |
-| `src/data/mockData.ts` | Add baseline fields to mock data |
-
+### Files to Change
+- **New migration**: Create `checklist_items` table with RLS
+- **`src/components/TaskDialog.tsx`**: Add checklist UI section, fetch/mutate checklist items, add completion validation logic
