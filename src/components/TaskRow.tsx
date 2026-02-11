@@ -104,10 +104,10 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
     <>
       <div
         className={cn(
-          "grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm",
+          "grid gap-0 px-4 py-2.5 border-t hover:bg-muted/40 transition-colors items-center text-sm min-w-[1200px]",
           hasSubTasks && "font-medium bg-muted/10"
         )}
-        style={{ borderLeft: `4px solid ${bucketColor}15`, paddingLeft: `${16 + indent}px` }}
+        style={{ gridTemplateColumns: '24px minmax(200px,1fr) 140px 100px 100px 120px 110px 110px 110px 110px 50px', borderLeft: `4px solid ${bucketColor}15`, paddingLeft: `${16 + indent}px` }}
       >
         <div className="flex items-center gap-0.5">
           {dragHandleProps && depth === 0 ? (
