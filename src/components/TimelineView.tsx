@@ -4,17 +4,122 @@ import {
   startOfWeek, endOfWeek, eachWeekOfInterval,
 } from 'date-fns';
 import { useProject } from '@/context/ProjectContext';
+import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { STATUS_CONFIG } from '@/types/project';
+import { Task, STATUS_CONFIG } from '@/types/project';
+
+function TaskTimelineRow({
+  task,
+  depth,
+  weeks,
+  totalDays,
+  timelineStart,
+  todayPercent,
+  getTaskPosition,
+}: {
+  task: Task;
+  depth: number;
+  weeks: Date[];
+  totalDays: number;
+  timelineStart: Date;
+  todayPercent: number;
+  getTaskPosition: (s: string, e: string) => { left: string; width: string };
+}) {
+  const hasSubTasks = task.subTasks.length > 0;
+
+  // Roll-up dates for parents
+  let displayStart = task.startDate;
+  let displayEnd = task.endDate;
+  if (hasSubTasks) {
+    const subs = task.subTasks;
+    displayStart = subs.reduce((min, t) => t.startDate < min ? t.startDate : min, subs[0].startDate);
+    displayEnd = subs.reduce((max, t) => t.endDate > max ? t.endDate : max, subs[0].endDate);
+  }
+
+  const pos = getTaskPosition(displayStart, displayEnd);
+  const statusColor = hasSubTasks
+    ? task.subTasks.some(t => t.status === 'stuck') ? `hsl(var(--${STATUS_CONFIG['stuck'].colorVar}))` :
+      task.subTasks.every(t => t.status === 'done') ? `hsl(var(--${STATUS_CONFIG['done'].colorVar}))` :
+      task.subTasks.some(t => t.status === 'working' || t.status === 'done') ? `hsl(var(--${STATUS_CONFIG['working'].colorVar}))` :
+      `hsl(var(--${STATUS_CONFIG['not-started'].colorVar}))`
+    : `hsl(var(--${STATUS_CONFIG[task.status].colorVar}))`;
+
+  return (
+    <>
+      <div className="flex items-center border-b hover:bg-muted/20 transition-colors">
+        <div
+          className="w-[260px] shrink-0 px-4 py-3 flex items-center gap-2.5 border-r"
+          style={{ paddingLeft: `${16 + depth * 20}px` }}
+        >
+          <OwnerAvatar owner={task.owner} />
+          <span className={`text-sm text-foreground truncate ${hasSubTasks ? 'font-medium' : ''}`}>
+            {task.title}
+          </span>
+          {hasSubTasks && (
+            <span className="text-[10px] text-muted-foreground shrink-0">({task.subTasks.length})</span>
+          )}
+        </div>
+        <div className="flex-1 relative h-12">
+          {/* Week grid lines */}
+          {weeks.map((_, i) => (
+            <div
+              key={i}
+              className="absolute top-0 bottom-0 border-r border-border/10"
+              style={{
+                left: `${(i * 7 / totalDays) * 100}%`,
+                width: `${(7 / totalDays) * 100}%`,
+              }}
+            />
+          ))}
+          {/* Task Bar */}
+          <div
+            className={`absolute top-2.5 h-7 rounded-md shadow-sm cursor-pointer hover:shadow-md hover:brightness-110 transition-all ${hasSubTasks ? 'opacity-60 border-2 border-white/30' : ''}`}
+            style={{
+              left: pos.left,
+              width: pos.width,
+              backgroundColor: statusColor,
+            }}
+            title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}`}
+          >
+            <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
+              {task.title}
+            </span>
+          </div>
+          {/* Today Line */}
+          {todayPercent > 0 && todayPercent < 100 && (
+            <div
+              className="absolute top-0 bottom-0 w-0.5 z-10 pointer-events-none"
+              style={{
+                left: `${todayPercent}%`,
+                backgroundColor: 'hsl(var(--destructive))',
+              }}
+            />
+          )}
+        </div>
+      </div>
+      {/* Render sub-tasks */}
+      {hasSubTasks && task.subTasks.map(sub => (
+        <TaskTimelineRow
+          key={sub.id}
+          task={sub}
+          depth={depth + 1}
+          weeks={weeks}
+          totalDays={totalDays}
+          timelineStart={timelineStart}
+          todayPercent={todayPercent}
+          getTaskPosition={getTaskPosition}
+        />
+      ))}
+    </>
+  );
+}
 
 export function TimelineView() {
   const { project } = useProject();
 
   const allTasks = useMemo(() =>
-    project.buckets.flatMap(b =>
-      b.tasks.map(t => ({ ...t, bucketName: b.name, bucketColor: b.color }))
-    ), [project.buckets]
-  );
+    project.buckets.flatMap(b => flattenTasks(b.tasks).map(t => ({ ...t, bucketName: b.name, bucketColor: b.color })))
+  , [project.buckets]);
 
   const { timelineStart, totalDays, weeks } = useMemo(() => {
     if (allTasks.length === 0) {
@@ -86,66 +191,25 @@ export function TimelineView() {
                     {bucket.name}
                   </span>
                   <span className="text-[11px] text-muted-foreground">
-                    ({bucket.tasks.length})
+                    ({flattenTasks(bucket.tasks).length})
                   </span>
                 </div>
                 <div className="flex-1" />
               </div>
 
-              {/* Task rows */}
-              {bucket.tasks.map(task => {
-                const pos = getTaskPosition(task.startDate, task.endDate);
-                const statusColor = `hsl(var(--${STATUS_CONFIG[task.status].colorVar}))`;
-
-                return (
-                  <div
-                    key={task.id}
-                    className="flex items-center border-b hover:bg-muted/20 transition-colors"
-                  >
-                    <div className="w-[260px] shrink-0 px-4 py-3 flex items-center gap-2.5 border-r">
-                      <OwnerAvatar owner={task.owner} />
-                      <span className="text-sm text-foreground truncate">{task.title}</span>
-                    </div>
-                    <div className="flex-1 relative h-12">
-                      {/* Week grid lines */}
-                      {weeks.map((_, i) => (
-                        <div
-                          key={i}
-                          className="absolute top-0 bottom-0 border-r border-border/10"
-                          style={{
-                            left: `${(i * 7 / totalDays) * 100}%`,
-                            width: `${(7 / totalDays) * 100}%`,
-                          }}
-                        />
-                      ))}
-                      {/* Task Bar */}
-                      <div
-                        className="absolute top-2.5 h-7 rounded-md shadow-sm cursor-pointer hover:shadow-md hover:brightness-110 transition-all"
-                        style={{
-                          left: pos.left,
-                          width: pos.width,
-                          backgroundColor: statusColor,
-                        }}
-                        title={`${task.title}: ${format(parseISO(task.startDate), 'MMM dd')} – ${format(parseISO(task.endDate), 'MMM dd')}`}
-                      >
-                        <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
-                          {task.title}
-                        </span>
-                      </div>
-                      {/* Today Line */}
-                      {todayPercent > 0 && todayPercent < 100 && (
-                        <div
-                          className="absolute top-0 bottom-0 w-0.5 z-10 pointer-events-none"
-                          style={{
-                            left: `${todayPercent}%`,
-                            backgroundColor: 'hsl(var(--destructive))',
-                          }}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {/* Task rows (recursive) */}
+              {bucket.tasks.map(task => (
+                <TaskTimelineRow
+                  key={task.id}
+                  task={task}
+                  depth={0}
+                  weeks={weeks}
+                  totalDays={totalDays}
+                  timelineStart={timelineStart}
+                  todayPercent={todayPercent}
+                  getTaskPosition={getTaskPosition}
+                />
+              ))}
             </div>
           ))}
         </div>
