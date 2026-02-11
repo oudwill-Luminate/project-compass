@@ -25,6 +25,7 @@ interface ProjectContextType {
   getAllTasks: () => Task[];
   getTaskById: (taskId: string) => Task | undefined;
   setBaseline: () => Promise<void>;
+  clearBaseline: () => Promise<void>;
   loading: boolean;
   members: { id: string; user_id: string; role: string; profile: any }[];
 }
@@ -32,7 +33,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask, setBaseline: dbSetBaseline } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask, setBaseline: dbSetBaseline, clearBaseline: dbClearBaseline } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -95,6 +96,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         getAllTasks,
         getTaskById,
         setBaseline: dbSetBaseline,
+        clearBaseline: dbClearBaseline,
         loading,
         members,
       }}
