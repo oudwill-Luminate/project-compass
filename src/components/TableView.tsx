@@ -116,14 +116,13 @@ export function TableView() {
                         onCancel={() => setEditingBucketId(null)}
                       />
                     ) : (
-                      <button
-                        onClick={() => toggleBucket(bucket.id)}
+                      <span
                         onDoubleClick={(e) => { e.stopPropagation(); setEditingBucketId(bucket.id); }}
-                        className="font-bold text-sm text-left"
+                        className="font-bold text-sm text-left cursor-pointer select-none"
                         style={{ color: bucket.color }}
                       >
                         {bucket.name}
-                      </button>
+                      </span>
                     )}
 
                     <span className="text-xs text-muted-foreground">
