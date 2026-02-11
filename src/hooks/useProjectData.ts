@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Bucket, Task, Owner, DependencyType } from '@/types/project';
 import { useAuth } from '@/context/AuthContext';
 import { differenceInDays, parseISO, addDays, format } from 'date-fns';
 import { toast } from 'sonner';
+import { computeCriticalPath } from '@/lib/criticalPath';
 
 interface ProfileRow {
   id: string;
@@ -842,5 +843,12 @@ export function useProjectData(projectId: string | undefined) {
     await supabase.from('project_goals' as any).delete().eq('id', goalId);
   }, []);
 
-  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, profiles, toOwner, updateCharter, goals, addGoal, updateGoal, deleteGoal };
+  // Centralized critical path / slack computation
+  const { criticalTaskIds, slackDays } = useMemo(() => {
+    if (!project) return { criticalTaskIds: new Set<string>(), slackDays: new Map<string, number>() };
+    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+    return computeCriticalPath(allTasks);
+  }, [project]);
+
+  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, profiles, toOwner, updateCharter, goals, addGoal, updateGoal, deleteGoal, criticalTaskIds, slackDays };
 }
