@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, MoreHorizontal, Pencil, Trash2, Settings2, Eye, EyeOff } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
@@ -9,12 +9,15 @@ import { TaskDialog } from './TaskDialog';
 import { Task } from '@/types/project';
 import { cn } from '@/lib/utils';
 import { format, parseISO, addDays } from 'date-fns';
+import { ALL_COLUMNS, loadVisibleColumns, saveVisibleColumns, buildGridTemplate, getVisibleColumns } from './tableColumns';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 
 function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { placeholder: string; onSubmit: (value: string) => void; onCancel: () => void; initialValue?: string }) {
   const [value, setValue] = useState(initialValue);
@@ -45,6 +48,21 @@ export function TableView() {
   const [addingBucket, setAddingBucket] = useState(false);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
   const [newTaskBucketId, setNewTaskBucketId] = useState<string | null>(null);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(loadVisibleColumns);
+
+  const toggleColumn = (colId: string) => {
+    setVisibleColumnIds(prev => {
+      const next = prev.includes(colId)
+        ? prev.filter(id => id !== colId)
+        : [...prev, colId];
+      saveVisibleColumns(next);
+      return next;
+    });
+  };
+
+  const gridCols = useMemo(() => buildGridTemplate(visibleColumnIds), [visibleColumnIds]);
+  const visibleCols = useMemo(() => getVisibleColumns(visibleColumnIds), [visibleColumnIds]);
+  const toggleableColumns = ALL_COLUMNS.filter(c => !c.locked && c.label);
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const defaultEndDate = format(addDays(new Date(), 7), 'yyyy-MM-dd');
@@ -85,33 +103,59 @@ export function TableView() {
     moveTask(draggableId, destination.droppableId, destination.index);
   }, [moveTask]);
 
-  const gridCols = '24px minmax(200px,1fr) 140px 100px 100px 120px 110px 110px 110px 110px 50px';
-
   return (
     <div className="flex-1 overflow-auto">
       <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">{project.name}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Track progress across all project phases
-          </p>
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{project.name}</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Track progress across all project phases
+            </p>
+          </div>
+
+          {/* Column Settings */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Settings2 className="w-3.5 h-3.5" />
+                Columns
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-52 p-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5">
+                Toggle Columns
+              </p>
+              {toggleableColumns.map(col => {
+                const isVisible = visibleColumnIds.includes(col.id);
+                return (
+                  <button
+                    key={col.id}
+                    onClick={() => toggleColumn(col.id)}
+                    className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm hover:bg-muted transition-colors"
+                  >
+                    {isVisible ? (
+                      <Eye className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
+                    )}
+                    <span className={cn(!isVisible && "text-muted-foreground")}>{col.label}</span>
+                  </button>
+                );
+              })}
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div className="overflow-x-auto">
         {/* Column Headers */}
-        <div className="sticky top-0 z-10 bg-background border-b min-w-[1200px]">
+        <div className="sticky top-0 z-10 bg-background border-b" style={{ minWidth: '900px' }}>
           <div className="grid gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ gridTemplateColumns: gridCols }}>
-            <span></span>
-            <span>Task</span>
-            <span>Status</span>
-            <span>Priority</span>
-            <span>Owner</span>
-            <span>Responsible</span>
-            <span>Start</span>
-            <span>End</span>
-            <span className="text-right">Est. Cost</span>
-            <span className="text-right">Actual</span>
-            <span></span>
+            {visibleCols.map(col => (
+              <span key={col.id} className={cn(col.align === 'right' && 'text-right')}>
+                {col.label}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -125,6 +169,14 @@ export function TableView() {
               const dates = allBucketTasks.flatMap(t => [parseISO(t.startDate), parseISO(t.endDate)]);
               const bucketStart = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
               const bucketEnd = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+
+              // Build subtotal cells dynamically
+              const subtotalCells = visibleCols.map(col => {
+                if (col.id === 'task') return <span key={col.id} className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">Subtotal</span>;
+                if (col.id === 'estCost') return <span key={col.id} className="text-right font-bold tabular-nums">${bucketEstimated.toLocaleString()}</span>;
+                if (col.id === 'actual') return <span key={col.id} className="text-right font-bold tabular-nums">${bucketActual.toLocaleString()}</span>;
+                return <span key={col.id}></span>;
+              });
 
               return (
                 <div key={bucket.id} className="rounded-xl border overflow-hidden shadow-sm">
@@ -219,6 +271,8 @@ export function TableView() {
                                         bucketId={bucket.id}
                                         bucketColor={bucket.color}
                                         dragHandleProps={dragProvided.dragHandleProps}
+                                        gridCols={gridCols}
+                                        visibleColumnIds={visibleColumnIds}
                                       />
                                     </div>
                                   )}
@@ -242,21 +296,10 @@ export function TableView() {
 
                         {/* Bucket Footer */}
                         <div
-                          className="grid gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm min-w-[1200px]"
-                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}` }}
+                          className="grid gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
+                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}`, minWidth: '900px' }}
                         >
-                          <span></span>
-                          <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-                            Subtotal
-                          </span>
-                          <span></span><span></span><span></span><span></span><span></span><span></span>
-                          <span className="text-right font-bold tabular-nums">
-                            ${bucketEstimated.toLocaleString()}
-                          </span>
-                          <span className="text-right font-bold tabular-nums">
-                            ${bucketActual.toLocaleString()}
-                          </span>
-                          <span></span>
+                          {subtotalCells}
                         </div>
                       </motion.div>
                     )}
