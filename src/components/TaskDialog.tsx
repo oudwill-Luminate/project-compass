@@ -35,9 +35,11 @@ interface TaskDialogProps {
   task: Task;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  isNew?: boolean;
+  onCreateSave?: (data: Omit<Task, 'id' | 'subTasks'>) => void;
 }
 
-export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
+export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: TaskDialogProps) {
   const { updateTask, getAllTasks } = useProject();
   const [formData, setFormData] = useState<Task>({ ...task });
 
@@ -67,7 +69,12 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
   };
 
   const handleSave = () => {
-    updateTask(task.id, formData);
+    if (isNew && onCreateSave) {
+      const { id, subTasks, ...rest } = formData;
+      onCreateSave(rest);
+    } else {
+      updateTask(task.id, formData);
+    }
     onOpenChange(false);
   };
 
@@ -77,7 +84,7 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[560px] bg-background max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-lg">Edit Task</DialogTitle>
+          <DialogTitle className="text-lg">{isNew ? 'New Task' : 'Edit Task'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 mt-2">
@@ -323,7 +330,7 @@ export function TaskDialog({ task, open, onOpenChange }: TaskDialogProps) {
           {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={handleSave}>Save Changes</Button>
+            <Button onClick={handleSave}>{isNew ? 'Create Task' : 'Save Changes'}</Button>
           </div>
         </div>
       </DialogContent>
