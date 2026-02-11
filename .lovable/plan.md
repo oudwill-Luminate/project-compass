@@ -1,27 +1,25 @@
 
-## Fix Table Width Rendering
 
-### Problem
-The table's `minWidth` is set to `900px`, but the actual column widths add up to approximately 1174px minimum. This causes columns on the right side (Actual cost, Actions) to be squished or cut off.
+## Fix Table Width Rendering (Take 2)
+
+### Root Cause
+The bucket containers (`rounded-xl border overflow-hidden`) clip their children because of `overflow-hidden`. Even though the inner grid rows have the correct `minWidth`, the parent containers don't respect it. The horizontal scroll wrapper only works if ALL content inside it has consistent minimum widths.
 
 ### Solution
-Calculate the minimum width dynamically based on which columns are visible, so the table always has enough room for all active columns.
+Apply `minWidth` to the scrollable wrapper's inner content so everything expands together, rather than trying to set it on individual rows.
 
 ### Changes
 
-**1. `src/components/tableColumns.ts`**
-- Add a helper function `calcMinWidth(visibleIds)` that sums up the pixel widths of all visible columns (using fixed values; the flexible `task` column counts as its minimum 200px)
-- This ensures the min-width adapts when columns are hidden/shown
+**`src/components/TableView.tsx`**
+1. Wrap all content inside the `overflow-x-auto` div in a single inner div with `style={{ minWidth }}` -- this ensures the header, all bucket containers, and all rows expand to the same width together
+2. Remove `minWidth` from the individual header div (line 153) and bucket footer div (line 301) since the parent wrapper handles it
+3. Change bucket container from `overflow-hidden` to `overflow-visible` so content isn't clipped (keep `rounded-xl border shadow-sm`)
 
-**2. `src/components/TableView.tsx`**
-- Replace the hardcoded `minWidth: '900px'` on the header and footer with the calculated min-width from the new helper
-- Apply the same min-width consistently to both header and bucket footer rows
-
-**3. `src/components/TaskRow.tsx`**
-- Replace the hardcoded `minWidth: '900px'` on task rows with the same calculated min-width
-- Pass the min-width value as a prop (or calculate from `visibleColumnIds`)
+**`src/components/TaskRow.tsx`**
+- Remove the per-row `minWidth: calcMinWidth(visibleColumnIds)` from the task row style (line 298) since the parent wrapper now handles it
+- Remove the `calcMinWidth` import since it's no longer needed here
 
 ### Technical Details
-- Column pixel values: drag=24, task=200(min), status=140, priority=100, owner=100, responsible=120, start=110, end=110, estCost=110, actual=110, actions=50
-- The function parses widths from the column definitions, treating `minmax(Xpx,1fr)` as X
-- Add ~32px padding buffer for the grid container padding
+- The key insight: `overflow-x-auto` on the scroll container only works when there's a single inner element wider than the container. Currently, each row independently sets its own `minWidth` but the parent bucket divs have `overflow-hidden` which clips them.
+- By moving `minWidth` to one wrapper div inside the scroll container, everything scrolls together consistently.
+- The bucket border rounding can be preserved with `overflow: visible` since the scroll container handles the clipping.
