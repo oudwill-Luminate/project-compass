@@ -29,13 +29,22 @@ function TaskTimelineRow({
   const [expanded, setExpanded] = useState(true);
   const hasSubTasks = task.subTasks.length > 0;
 
-  // Roll-up dates for parents
+  // Roll-up dates for parents (including children's buffers)
   let displayStart = task.startDate;
   let displayEnd = task.endDate;
   if (hasSubTasks) {
     const subs = task.subTasks;
-    displayStart = subs.reduce((min, t) => t.startDate < min ? t.startDate : min, subs[0].startDate);
-    displayEnd = subs.reduce((max, t) => t.endDate > max ? t.endDate : max, subs[0].endDate);
+    const effectiveDates = subs.map(t => {
+      const s = t.bufferDays > 0 && t.bufferPosition === 'start'
+        ? format(addDays(parseISO(t.startDate), -t.bufferDays), 'yyyy-MM-dd')
+        : t.startDate;
+      const e = t.bufferDays > 0 && t.bufferPosition === 'end'
+        ? format(addDays(parseISO(t.endDate), t.bufferDays), 'yyyy-MM-dd')
+        : t.endDate;
+      return { s, e };
+    });
+    displayStart = effectiveDates.reduce((min, d) => d.s < min ? d.s : min, effectiveDates[0].s);
+    displayEnd = effectiveDates.reduce((max, d) => d.e > max ? d.e : max, effectiveDates[0].e);
   }
 
   const pos = getTaskPosition(displayStart, displayEnd);
