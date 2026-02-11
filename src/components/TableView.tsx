@@ -149,8 +149,9 @@ export function TableView() {
         </div>
 
         <div className="overflow-x-auto">
+        <div style={{ minWidth }}>
         {/* Column Headers */}
-        <div className="sticky top-0 z-10 bg-background border-b" style={{ minWidth }}>
+        <div className="sticky top-0 z-10 bg-background border-b">
           <div className="grid gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ gridTemplateColumns: gridCols }}>
             {visibleCols.map(col => (
               <span key={col.id} className={cn(col.align === 'right' && 'text-right')}>
@@ -180,7 +181,7 @@ export function TableView() {
               });
 
               return (
-                <div key={bucket.id} className="rounded-xl border overflow-hidden shadow-sm">
+                <div key={bucket.id} className="rounded-xl border overflow-visible shadow-sm">
                   {/* Bucket Header */}
                   <div
                     className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
@@ -298,7 +299,7 @@ export function TableView() {
                         {/* Bucket Footer */}
                         <div
                           className="grid gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
-                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}`, minWidth }}
+                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}` }}
                         >
                           {subtotalCells}
                         </div>
@@ -310,6 +311,7 @@ export function TableView() {
             })}
           </div>
         </DragDropContext>
+        </div>
         </div>
 
         {/* Add Group */}
