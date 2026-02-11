@@ -85,6 +85,8 @@ export function TableView() {
     moveTask(draggableId, destination.droppableId, destination.index);
   }, [moveTask]);
 
+  const gridCols = '24px minmax(200px,1fr) 140px 100px 100px 120px 110px 110px 110px 110px 50px';
+
   return (
     <div className="flex-1 overflow-auto">
       <div className="p-6">
@@ -95,9 +97,10 @@ export function TableView() {
           </p>
         </div>
 
+        <div className="overflow-x-auto">
         {/* Column Headers */}
-        <div className="sticky top-0 z-10 bg-background border-b">
-          <div className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <div className="sticky top-0 z-10 bg-background border-b min-w-[1200px]">
+          <div className="grid gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ gridTemplateColumns: gridCols }}>
             <span></span>
             <span>Task</span>
             <span>Status</span>
@@ -239,8 +242,8 @@ export function TableView() {
 
                         {/* Bucket Footer */}
                         <div
-                          className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
-                          style={{ borderLeft: `4px solid ${bucket.color}` }}
+                          className="grid gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm min-w-[1200px]"
+                          style={{ gridTemplateColumns: gridCols, borderLeft: `4px solid ${bucket.color}` }}
                         >
                           <span></span>
                           <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
@@ -263,6 +266,7 @@ export function TableView() {
             })}
           </div>
         </DragDropContext>
+        </div>
 
         {/* Add Group */}
         <div className="mt-3">
