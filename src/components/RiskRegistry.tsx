@@ -83,6 +83,38 @@ export function RiskRegistry() {
           </p>
         </div>
 
+        {/* Risk Summary Cards */}
+        {flaggedTasks.length > 0 && (() => {
+          const counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+          flaggedTasks.forEach(t => {
+            const level = getRiskLevel(t.riskImpact, t.riskProbability).label;
+            counts[level as keyof typeof counts]++;
+          });
+          const cards = [
+            { label: 'Critical', count: counts.Critical, color: 'hsl(var(--status-stuck))', bg: 'hsl(var(--status-stuck) / 0.1)' },
+            { label: 'High', count: counts.High, color: 'hsl(var(--status-working))', bg: 'hsl(var(--status-working) / 0.1)' },
+            { label: 'Medium', count: counts.Medium, color: 'hsl(var(--priority-medium))', bg: 'hsl(var(--priority-medium) / 0.1)' },
+            { label: 'Low', count: counts.Low, color: 'hsl(var(--status-done))', bg: 'hsl(var(--status-done) / 0.1)' },
+          ];
+          return (
+            <div className="grid grid-cols-4 gap-3 mb-8">
+              {cards.map(c => (
+                <div
+                  key={c.label}
+                  className="rounded-xl border p-4 flex flex-col items-center gap-1"
+                  style={{ backgroundColor: c.bg }}
+                >
+                  <span className="text-2xl font-bold" style={{ color: c.color }}>{c.count}</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
+                    <span className="text-xs font-medium text-muted-foreground">{c.label}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* 5×5 Risk Matrix */}
         <div className="mb-10">
           <h2 className="text-sm font-bold text-foreground mb-4">Impact / Probability Matrix</h2>
