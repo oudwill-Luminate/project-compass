@@ -2,6 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
 import { CalendarIcon, AlertTriangle } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
+import { TaskChecklist, ChecklistItem } from '@/components/TaskChecklist';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 import { Task, TaskStatus, TaskPriority, DependencyType, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
@@ -60,10 +63,30 @@ interface TaskDialogProps {
 export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: TaskDialogProps) {
   const { updateTask, getAllTasks, members } = useProject();
   const [formData, setFormData] = useState<Task>({ ...task });
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
 
   useEffect(() => {
-    if (open) setFormData({ ...task });
-  }, [open, task]);
+    if (open) {
+      setFormData({ ...task });
+      // Fetch checklist items
+      if (!isNew) {
+        supabase
+          .from('checklist_items' as any)
+          .select('*')
+          .eq('task_id', task.id)
+          .order('position')
+          .then(({ data }) => {
+            if (data) {
+              setChecklistItems((data as any[]).map(d => ({
+                id: d.id, label: d.label, checked: d.checked, position: d.position
+              })));
+            }
+          });
+      } else {
+        setChecklistItems([]);
+      }
+    }
+  }, [open, task, isNew]);
 
   const duration = useMemo(() => {
     try {
@@ -86,9 +109,19 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    // Completion guard: check all checklist items
+    if (checklistItems.length > 0 && (formData.status === 'done' || formData.progress === 100)) {
+      const unchecked = checklistItems.filter(i => !i.checked).length;
+      if (unchecked > 0) {
+        toast({ title: 'Cannot mark as complete', description: `${unchecked} checklist item${unchecked > 1 ? 's are' : ' is'} not done`, variant: 'destructive' });
+        return;
+      }
+    }
+
     if (isNew && onCreateSave) {
       const { id, subTasks, ...rest } = formData;
+      // For new tasks, we'll need to save checklist items after the task is created
       onCreateSave(rest);
     } else {
       updateTask(task.id, formData);
@@ -361,6 +394,15 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               </div>
             )}
           </div>
+
+          {/* Quality Checklist */}
+          {!isNew && (
+            <TaskChecklist
+              taskId={task.id}
+              items={checklistItems}
+              onItemsChange={setChecklistItems}
+            />
+          )}
 
           {/* Risk Flag Toggle */}
           <div className="flex items-center justify-between p-3 rounded-lg border">
