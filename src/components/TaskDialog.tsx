@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
 import { CalendarIcon, AlertTriangle } from 'lucide-react';
+import { Slider } from '@/components/ui/slider';
 import { Task, TaskStatus, TaskPriority, DependencyType, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
@@ -104,7 +105,10 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               <Label className="text-xs font-medium">Status</Label>
               <Select
                 value={formData.status}
-                onValueChange={(v: TaskStatus) => setFormData({ ...formData, status: v })}
+                onValueChange={(v: TaskStatus) => {
+                  const progress = v === 'done' ? 100 : v === 'working' ? (formData.progress || 0) : 0;
+                  setFormData({ ...formData, status: v, progress });
+                }}
               >
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">
@@ -129,6 +133,20 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               </Select>
             </div>
           </div>
+
+          {/* Progress - only when status is "working" */}
+          {formData.status === 'working' && (
+            <div>
+              <Label className="text-xs font-medium">Progress ({formData.progress || 0}%)</Label>
+              <Slider
+                value={[formData.progress || 0]}
+                onValueChange={([v]) => setFormData({ ...formData, progress: v })}
+                max={100}
+                step={5}
+                className="mt-2"
+              />
+            </div>
+          )}
 
           {/* Owner */}
           <div>

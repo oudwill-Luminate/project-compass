@@ -27,6 +27,7 @@ export interface Task {
   bufferDays: number;
   bufferPosition: 'start' | 'end';
   responsible: string | null;
+  progress: number; // 0-100
   subTasks: Task[];
 }
 

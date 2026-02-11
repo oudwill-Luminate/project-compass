@@ -90,19 +90,28 @@ function TaskTimelineRow({
             />
           ))}
           {/* Task Bar */}
-          <div
-            className={`absolute top-2.5 h-7 rounded-md shadow-sm cursor-pointer hover:shadow-md hover:brightness-110 transition-all ${hasSubTasks ? 'opacity-60 border-2 border-white/30' : ''}`}
-            style={{
-              left: pos.left,
-              width: pos.width,
-              backgroundColor: statusColor,
-            }}
-            title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
-          >
-            <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
-              {task.title}
-            </span>
-          </div>
+          {(() => {
+            const isWorking = task.status === 'working' && !hasSubTasks;
+            const prog = task.progress || 0;
+            const barBg = isWorking && prog > 0
+              ? `linear-gradient(to right, ${statusColor} ${prog}%, ${statusColor}66 ${prog}%)`
+              : statusColor;
+            return (
+              <div
+                className={`absolute top-2.5 h-7 rounded-md shadow-sm cursor-pointer hover:shadow-md hover:brightness-110 transition-all ${hasSubTasks ? 'opacity-60 border-2 border-white/30' : ''}`}
+                style={{
+                  left: pos.left,
+                  width: pos.width,
+                  background: barBg,
+                }}
+                title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${isWorking && prog > 0 ? ` (${prog}%)` : ''}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
+              >
+                <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
+                  {task.title}
+                </span>
+              </div>
+            );
+          })()}
           {/* Buffer Bar */}
           {!hasSubTasks && task.bufferDays > 0 && (() => {
             const bufferWidth = (task.bufferDays / totalDays) * 100;

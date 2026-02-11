@@ -90,6 +90,7 @@ export function TableView() {
     riskProbability: 1,
     parentTaskId: null,
     responsible: null,
+    progress: 0,
     subTasks: [],
   };
 

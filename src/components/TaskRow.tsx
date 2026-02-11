@@ -25,6 +25,7 @@ function getRolledUp(task: Task) {
       endDate: task.endDate,
       estimatedCost: task.estimatedCost,
       actualCost: task.actualCost,
+      progress: task.progress,
     };
   }
 
@@ -49,7 +50,14 @@ function getRolledUp(task: Task) {
   else if (subs.some(t => t.status === 'stuck')) status = 'stuck';
   else if (subs.some(t => t.status === 'working' || t.status === 'done')) status = 'working';
 
-  return { status, startDate, endDate, estimatedCost, actualCost };
+  // Average progress for parent: done=100, not-started=0, others use their progress value
+  const progress = Math.round(subs.reduce((sum, t) => {
+    if (t.status === 'done') return sum + 100;
+    if (t.status === 'not-started') return sum + 0;
+    return sum + (t.progress || 0);
+  }, 0) / subs.length);
+
+  return { status, startDate, endDate, estimatedCost, actualCost, progress };
 }
 
 interface TaskRowProps {
@@ -160,6 +168,11 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
   }
 
   if (show('status')) {
+    const isWorking = rolled.status === 'working';
+    const prog = rolled.progress || 0;
+    const statusBg = isWorking && prog > 0
+      ? `linear-gradient(to right, hsl(var(--${statusConfig.colorVar})) ${prog}%, hsl(var(--${statusConfig.colorVar}) / 0.3) ${prog}%)`
+      : `hsl(var(--${statusConfig.colorVar}))`;
     cells.push(
       <button
         key="status"
@@ -168,10 +181,10 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
           "text-xs font-medium px-3 py-1.5 rounded-full text-white text-center transition-transform hover:scale-105 truncate",
           hasSubTasks ? "cursor-default opacity-80" : "cursor-pointer"
         )}
-        style={{ backgroundColor: `hsl(var(--${statusConfig.colorVar}))` }}
+        style={{ background: statusBg }}
         disabled={hasSubTasks}
       >
-        {statusConfig.label}
+        {isWorking && prog > 0 ? `Working ${prog}%` : statusConfig.label}
       </button>
     );
   }

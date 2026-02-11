@@ -1,0 +1,1 @@
+ALTER TABLE public.tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0;
