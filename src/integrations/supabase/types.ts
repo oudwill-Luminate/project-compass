@@ -308,6 +308,56 @@ export type Database = {
           },
         ]
       }
+      stakeholders: {
+        Row: {
+          communication_plan: string
+          created_at: string
+          engagement: Database["public"]["Enums"]["engagement_level"]
+          id: string
+          interest: number
+          name: string
+          position: number
+          power: number
+          project_id: string
+          role: string
+          updated_at: string
+        }
+        Insert: {
+          communication_plan?: string
+          created_at?: string
+          engagement?: Database["public"]["Enums"]["engagement_level"]
+          id?: string
+          interest?: number
+          name?: string
+          position?: number
+          power?: number
+          project_id: string
+          role?: string
+          updated_at?: string
+        }
+        Update: {
+          communication_plan?: string
+          created_at?: string
+          engagement?: Database["public"]["Enums"]["engagement_level"]
+          id?: string
+          interest?: number
+          name?: string
+          position?: number
+          power?: number
+          project_id?: string
+          role?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stakeholders_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           actual_cost: number
@@ -448,6 +498,12 @@ export type Database = {
     }
     Enums: {
       dependency_type: "FS" | "FF" | "SS" | "SF"
+      engagement_level:
+        | "unaware"
+        | "resistant"
+        | "neutral"
+        | "supportive"
+        | "leading"
       project_role: "owner" | "editor" | "viewer"
       risk_action_type: "mitigation" | "contingency"
       task_priority: "critical" | "high" | "medium" | "low"
@@ -580,6 +636,13 @@ export const Constants = {
   public: {
     Enums: {
       dependency_type: ["FS", "FF", "SS", "SF"],
+      engagement_level: [
+        "unaware",
+        "resistant",
+        "neutral",
+        "supportive",
+        "leading",
+      ],
       project_role: ["owner", "editor", "viewer"],
       risk_action_type: ["mitigation", "contingency"],
       task_priority: ["critical", "high", "medium", "low"],
