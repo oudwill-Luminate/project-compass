@@ -1,89 +1,86 @@
 
 
-## Monday-Style Polish for TableView
+## Baseline Date Tracking for Slippage Visibility
 
 ### Overview
 
-Add visual polish inspired by Monday.com: hover glow effects on task rows with reveal-on-hover drag handles, and smooth framer-motion layout animations for bucket expand/collapse.
+Add `baseline_start_date` and `baseline_end_date` columns to the tasks table, a "Set Baseline" button in the TableView header, and a faint gray baseline bar behind each task bar in the TimelineView to visualize schedule slippage.
 
 ---
 
-### 1. Task Row Hover Glow and Drag Handle Reveal
+### 1. Database Migration
 
-**File: `src/components/TaskRow.tsx`**
+Add two nullable date columns to the `tasks` table:
 
-- Add a CSS `group` class to the row container div so child elements can respond to hover state
-- Hide the drag handle by default using `opacity-0` and reveal it on row hover with `group-hover:opacity-100` plus a smooth transition
-- Replace the plain `hover:bg-muted/40` with a more polished glow effect using a subtle box-shadow or a gradient background on hover:
-  - Add `transition-all duration-200` for smoothness
-  - On hover: apply a soft left-edge glow using the bucket color and a light background highlight
-
-**Changes to the row div (line ~309-314):**
-```tsx
-<div
-  className={cn(
-    "group grid gap-0 px-4 py-2.5 border-t transition-all duration-200 items-center text-sm",
-    "hover:bg-primary/[0.03] hover:shadow-[inset_3px_0_0_0_var(--glow-color)]",
-    hasSubTasks && "font-medium bg-muted/10"
-  )}
-  style={{
-    gridTemplateColumns: gridCols,
-    borderLeft: `4px solid ${bucketColor}15`,
-    paddingLeft: `${16 + indent}px`,
-    '--glow-color': bucketColor,
-  } as React.CSSProperties}
->
+```sql
+ALTER TABLE public.tasks
+  ADD COLUMN baseline_start_date date,
+  ADD COLUMN baseline_end_date date;
 ```
 
-**Drag handle (line ~126-133):** Change from always-visible to hover-revealed:
-```tsx
-<div {...dragHandleProps} className="flex items-center cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-  <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />
-</div>
-```
-
-The placeholder `<div className="w-3.5" />` for non-draggable rows stays hidden.
+Both are nullable because tasks won't have a baseline until the user explicitly sets one.
 
 ---
 
-### 2. Smooth Bucket Expand/Collapse with Framer Motion
+### 2. Update Type Definitions
+
+**File: `src/types/project.ts`**
+
+Add to the `Task` interface:
+- `baselineStartDate: string | null`
+- `baselineEndDate: string | null`
+
+---
+
+### 3. Update Data Layer
+
+**File: `src/hooks/useProjectData.ts`**
+
+- Update `TaskRow` interface to include `baseline_start_date` and `baseline_end_date`
+- Update `buildTaskTree` to map these new fields into the `Task` object
+- Update `updateTask` to handle `baselineStartDate` / `baselineEndDate` mapping to DB columns
+- Add a new `setBaseline` function that bulk-updates all tasks in the project, copying each task's current `start_date` / `end_date` into `baseline_start_date` / `baseline_end_date`
+
+**File: `src/context/ProjectContext.tsx`**
+
+- Expose `setBaseline` in the context type and provider
+
+---
+
+### 4. "Set Baseline" Button in TableView
 
 **File: `src/components/TableView.tsx`**
 
-The current implementation already uses `AnimatePresence` and `motion.div` with `height: 0 -> auto` for bucket collapse. The refinement will:
-
-- Add `layout` prop to each `Draggable` wrapper so rows animate their position when siblings appear/disappear
-- Adjust the existing `motion.div` animation to use a spring transition for a more natural feel instead of the current `easeInOut`:
-
-```tsx
-<motion.div
-  initial={{ height: 0, opacity: 0 }}
-  animate={{ height: 'auto', opacity: 1 }}
-  exit={{ height: 0, opacity: 0 }}
-  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-  className="overflow-hidden"
->
-```
-
-- Wrap each bucket's outer `div` (inside the `Draggable` render) with `motion.div` using `layout` transition so buckets below a collapsing bucket slide up smoothly:
-
-```tsx
-<motion.div
-  layout
-  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-  ref={bucketDragProvided.innerRef}
-  {...bucketDragProvided.draggableProps}
-  className={cn("rounded-xl border overflow-visible shadow-sm", ...)}
->
-```
-
-- Add `<LayoutGroup>` wrapper from framer-motion around the bucket list to coordinate layout animations across siblings.
+- Add a "Set Baseline" button next to the existing "Columns" settings button in the header area
+- Clicking it calls `setBaseline()` from context, which snapshots all current dates
+- Use a confirmation dialog or a simple `confirm()` prompt since this overwrites any previous baseline
+- Use a `Target` or `Flag` icon from lucide-react for visual identification
 
 ---
 
-### 3. Optional: Actions Column Hover Reveal
+### 5. Baseline Bar in TimelineView
 
-As a bonus Monday-style touch, the actions menu button (three dots) will also use `opacity-0 group-hover:opacity-100` so it only appears on hover, reducing visual clutter.
+**File: `src/components/TimelineView.tsx`**
+
+- In the `TaskTimelineRow` component, after rendering the main task bar, render a second bar if `task.baselineStartDate` and `task.baselineEndDate` are set
+- The baseline bar will be:
+  - Positioned using `getTaskPosition(baselineStartDate, baselineEndDate)`
+  - Styled as a faint gray bar (`bg-muted-foreground/20`) with a dashed or solid border
+  - Placed slightly below the main bar (offset `top` by ~2px) so it peeks out underneath, making slippage visually obvious
+  - Thinner height (`h-5` vs the main bar's `h-7`) and `z-0` so the active bar sits on top
+- Add a legend entry for "Baseline" in the timeline header alongside the existing Task/Buffer/Today legend items
+
+---
+
+### 6. Update Task Template
+
+**File: `src/components/TableView.tsx`**
+
+- Add `baselineStartDate: null` and `baselineEndDate: null` to `newTaskTemplate`
+
+**File: `src/data/mockData.ts`**
+
+- Add the new fields to any mock task definitions
 
 ---
 
@@ -91,13 +88,11 @@ As a bonus Monday-style touch, the actions menu button (three dots) will also us
 
 | File | Change |
 |------|--------|
-| `src/components/TaskRow.tsx` | Add `group` class, hover glow, drag handle + actions reveal-on-hover |
-| `src/components/TableView.tsx` | Add `layout` + spring transitions to bucket expand/collapse, wrap with `LayoutGroup` |
-
-### Technical Notes
-
-- `LayoutGroup` is imported from `framer-motion` (already installed)
-- The `--glow-color` CSS variable technique avoids needing inline style overrides for the box-shadow
-- Spring transitions (`stiffness: 400, damping: 30`) give a snappy but not bouncy feel similar to Monday.com
-- No new dependencies needed
+| `supabase/migrations/...` | Add `baseline_start_date` and `baseline_end_date` columns |
+| `src/types/project.ts` | Add baseline fields to `Task` interface |
+| `src/hooks/useProjectData.ts` | Map new columns, add `setBaseline` bulk function |
+| `src/context/ProjectContext.tsx` | Expose `setBaseline` in context |
+| `src/components/TableView.tsx` | Add "Set Baseline" button, update task template |
+| `src/components/TimelineView.tsx` | Render gray baseline bar underneath active bar, add legend |
+| `src/data/mockData.ts` | Add baseline fields to mock data |
 
