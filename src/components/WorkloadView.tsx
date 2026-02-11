@@ -1,11 +1,16 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { parseISO, eachDayOfInterval, format } from 'date-fns';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
 import { Task } from '@/types/project';
 import { cn } from '@/lib/utils';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Scale } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { computeCriticalPath } from '@/lib/criticalPath';
+import { computeLevelingSuggestions, LevelingProposal } from '@/lib/resourceLeveling';
+import { LevelResourcesDialog } from './LevelResourcesDialog';
+import { toast } from 'sonner';
 
 interface MemberWorkload {
   userId: string;
@@ -17,11 +22,16 @@ interface MemberWorkload {
 }
 
 export function WorkloadView() {
-  const { project, members } = useProject();
+  const { project, members, updateTask } = useProject();
+  const [proposals, setProposals] = useState<LevelingProposal[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const allTasks = useMemo(
+    () => project.buckets.flatMap(b => flattenTasks(b.tasks)),
+    [project.buckets]
+  );
 
   const workloads = useMemo(() => {
-    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
-
     // Group tasks by owner
     const tasksByOwner = new Map<string, Task[]>();
     for (const task of allTasks) {
@@ -33,7 +43,6 @@ export function WorkloadView() {
 
     const result: MemberWorkload[] = [];
 
-    // Include all members, even those with no tasks
     const allUserIds = new Set<string>();
     members.forEach(m => allUserIds.add(m.user_id));
     tasksByOwner.forEach((_, id) => allUserIds.add(id));
@@ -44,7 +53,6 @@ export function WorkloadView() {
       const name = member?.profile?.display_name || 'Unknown';
       const totalEffortHours = tasks.reduce((s, t) => s + t.effortHours, 0);
 
-      // Calculate daily load: distribute effort hours evenly across task duration
       const dailyLoad = new Map<string, number>();
       for (const task of tasks) {
         if (task.effortHours <= 0) continue;
@@ -78,19 +86,51 @@ export function WorkloadView() {
     }
 
     return result.sort((a, b) => b.totalEffortHours - a.totalEffortHours);
-  }, [project.buckets, members]);
+  }, [allTasks, members]);
 
   const totalEffort = workloads.reduce((s, w) => s + w.totalEffortHours, 0);
   const overAllocatedCount = workloads.filter(w => w.overAllocatedDays.length > 0).length;
 
+  const handleLevelResources = useCallback(() => {
+    const criticalPath = computeCriticalPath(allTasks);
+    const suggestions = computeLevelingSuggestions(allTasks, criticalPath);
+
+    if (suggestions.length === 0) {
+      toast.info('All over-allocated tasks are on the critical path and cannot be moved.');
+      return;
+    }
+
+    setProposals(suggestions);
+    setDialogOpen(true);
+  }, [allTasks]);
+
+  const handleApply = useCallback(() => {
+    for (const p of proposals) {
+      updateTask(p.taskId, { startDate: p.newStart, endDate: p.newEnd });
+    }
+    setDialogOpen(false);
+    toast.success(`Leveled ${proposals.length} task${proposals.length !== 1 ? 's' : ''} successfully.`);
+  }, [proposals, updateTask]);
+
   return (
     <div className="flex-1 overflow-auto">
       <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">Workload</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Team allocation and effort distribution
-          </p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Workload</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Team allocation and effort distribution
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={overAllocatedCount === 0}
+            onClick={handleLevelResources}
+          >
+            <Scale className="w-4 h-4 mr-1.5" />
+            Level Resources
+          </Button>
         </div>
 
         {/* Summary Cards */}
@@ -186,6 +226,13 @@ export function WorkloadView() {
           )}
         </div>
       </div>
+
+      <LevelResourcesDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        proposals={proposals}
+        onApply={handleApply}
+      />
     </div>
   );
 }
