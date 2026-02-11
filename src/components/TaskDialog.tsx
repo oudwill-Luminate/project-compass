@@ -486,6 +486,16 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                   className="mt-1 min-h-[60px] text-xs"
                 />
               </div>
+              <div>
+                <Label className="text-xs font-medium">Realized Mitigation Cost ($)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={formData.realizedCost || 0}
+                  onChange={e => setFormData({ ...formData, realizedCost: Number(e.target.value) })}
+                  className="mt-1"
+                />
+              </div>
             </div>
           )}
 

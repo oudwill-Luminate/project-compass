@@ -48,6 +48,7 @@ interface TaskRow {
   effort_hours: number;
   baseline_start_date: string | null;
   baseline_end_date: string | null;
+  realized_cost: number;
 }
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
@@ -86,6 +87,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       effortHours: Number(t.effort_hours) || 0,
       baselineStartDate: t.baseline_start_date || null,
       baselineEndDate: t.baseline_end_date || null,
+      realizedCost: Number(t.realized_cost) || 0,
       subTasks: [],
     });
   }
@@ -443,6 +445,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.effortHours !== undefined) dbUpdates.effort_hours = updates.effortHours;
     if (updates.baselineStartDate !== undefined) dbUpdates.baseline_start_date = updates.baselineStartDate;
     if (updates.baselineEndDate !== undefined) dbUpdates.baseline_end_date = updates.baselineEndDate;
+    if (updates.realizedCost !== undefined) dbUpdates.realized_cost = updates.realizedCost;
     if (updates.owner !== undefined) dbUpdates.owner_id = updates.owner.id === 'unknown' ? null : updates.owner.id;
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
@@ -600,6 +603,7 @@ export function useProjectData(projectId: string | undefined) {
       parentTaskId: parentTaskId || null,
       baselineStartDate: null,
       baselineEndDate: null,
+      realizedCost: 0,
       subTasks: [],
     };
 
