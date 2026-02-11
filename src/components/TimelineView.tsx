@@ -124,6 +124,20 @@ function TaskTimelineRow({
               </div>
             );
           })()}
+          {/* Baseline Bar */}
+          {!hasSubTasks && task.baselineStartDate && task.baselineEndDate && (() => {
+            const baselinePos = getTaskPosition(task.baselineStartDate, task.baselineEndDate);
+            return (
+              <div
+                className="absolute top-4 h-5 rounded-md bg-muted-foreground/20 border border-muted-foreground/30"
+                style={{
+                  left: baselinePos.left,
+                  width: baselinePos.width,
+                }}
+                title={`Baseline: ${format(parseISO(task.baselineStartDate), 'MMM dd')} – ${format(parseISO(task.baselineEndDate), 'MMM dd')}`}
+              />
+            );
+          })()}
           {/* Buffer Bar */}
           {!hasSubTasks && task.bufferDays > 0 && (() => {
             const bufferWidth = (task.bufferDays / totalDays) * 100;
@@ -255,6 +269,10 @@ export function TimelineView() {
           <div className="flex items-center gap-1.5">
             <div className="w-3 h-3 rounded-sm bg-destructive" />
             <span>Today</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-3 rounded-sm bg-muted-foreground/20 border border-muted-foreground/30" />
+            <span>Baseline</span>
           </div>
         </div>
       </div>

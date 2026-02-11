@@ -45,6 +45,8 @@ interface TaskRow {
   responsible: string | null;
   progress: number;
   risk_description: string;
+  baseline_start_date: string | null;
+  baseline_end_date: string | null;
 }
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
@@ -80,6 +82,8 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       bufferPosition: (t.buffer_position === 'start' ? 'start' : 'end') as 'start' | 'end',
       responsible: t.responsible || null,
       progress: t.progress || 0,
+      baselineStartDate: t.baseline_start_date || null,
+      baselineEndDate: t.baseline_end_date || null,
       subTasks: [],
     });
   }
@@ -434,6 +438,8 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
     if (updates.responsible !== undefined) dbUpdates.responsible = updates.responsible;
     if (updates.progress !== undefined) dbUpdates.progress = updates.progress;
+    if (updates.baselineStartDate !== undefined) dbUpdates.baseline_start_date = updates.baselineStartDate;
+    if (updates.baselineEndDate !== undefined) dbUpdates.baseline_end_date = updates.baselineEndDate;
     if (updates.owner !== undefined) dbUpdates.owner_id = updates.owner.id === 'unknown' ? null : updates.owner.id;
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
@@ -588,6 +594,8 @@ export function useProjectData(projectId: string | undefined) {
       riskProbability: 1,
       riskDescription: '',
       parentTaskId: parentTaskId || null,
+      baselineStartDate: null,
+      baselineEndDate: null,
       subTasks: [],
     };
 
@@ -718,5 +726,40 @@ export function useProjectData(projectId: string | undefined) {
     await supabase.from('projects').delete().eq('id', projectId);
   }, [projectId, project]);
 
-  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, refetch: fetchAll, profiles, toOwner };
+  const setBaseline = useCallback(async () => {
+    if (!project) return;
+    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+    
+    // Optimistic update
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: prev.buckets.map(b => ({
+          ...b,
+          tasks: (function setBaselineInTree(tasks: Task[]): Task[] {
+            return tasks.map(t => ({
+              ...t,
+              baselineStartDate: t.startDate,
+              baselineEndDate: t.endDate,
+              subTasks: setBaselineInTree(t.subTasks),
+            }));
+          })(b.tasks),
+        })),
+      };
+    });
+
+    // Bulk update in DB
+    await Promise.all(
+      allTasks.map(t =>
+        supabase.from('tasks').update({
+          baseline_start_date: t.startDate,
+          baseline_end_date: t.endDate,
+        }).eq('id', t.id)
+      )
+    );
+    toast.success('Baseline set for all tasks');
+  }, [project]);
+
+  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, refetch: fetchAll, profiles, toOwner };
 }

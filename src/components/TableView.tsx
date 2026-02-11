@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
-import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff, Target } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
@@ -46,7 +46,7 @@ function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { p
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members, setBaseline } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
   const [editDialogBucketId, setEditDialogBucketId] = useState<string | null>(null);
@@ -92,6 +92,8 @@ export function TableView() {
     parentTaskId: null,
     responsible: null,
     progress: 0,
+    baselineStartDate: null,
+    baselineEndDate: null,
     subTasks: [],
   };
 
@@ -128,37 +130,52 @@ export function TableView() {
             </p>
           </div>
 
-          {/* Column Settings */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-                <Settings2 className="w-3.5 h-3.5" />
-                Columns
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-52 p-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5">
-                Toggle Columns
-              </p>
-              {toggleableColumns.map(col => {
-                const isVisible = visibleColumnIds.includes(col.id);
-                return (
-                  <button
-                    key={col.id}
-                    onClick={() => toggleColumn(col.id)}
-                    className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm hover:bg-muted transition-colors"
-                  >
-                    {isVisible ? (
-                      <Eye className="w-3.5 h-3.5 text-primary" />
-                    ) : (
-                      <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
-                    )}
-                    <span className={cn(!isVisible && "text-muted-foreground")}>{col.label}</span>
-                  </button>
-                );
-              })}
-            </PopoverContent>
-          </Popover>
+          {/* Column Settings & Set Baseline */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => {
+                if (confirm('This will snapshot all current task dates as the baseline. Any previous baseline will be overwritten. Continue?')) {
+                  setBaseline();
+                }
+              }}
+            >
+              <Target className="w-3.5 h-3.5" />
+              Set Baseline
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                  <Settings2 className="w-3.5 h-3.5" />
+                  Columns
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-52 p-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5">
+                  Toggle Columns
+                </p>
+                {toggleableColumns.map(col => {
+                  const isVisible = visibleColumnIds.includes(col.id);
+                  return (
+                    <button
+                      key={col.id}
+                      onClick={() => toggleColumn(col.id)}
+                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm hover:bg-muted transition-colors"
+                    >
+                      {isVisible ? (
+                        <Eye className="w-3.5 h-3.5 text-primary" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
+                      )}
+                      <span className={cn(!isVisible && "text-muted-foreground")}>{col.label}</span>
+                    </button>
+                  );
+                })}
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
