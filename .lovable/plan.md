@@ -1,25 +1,52 @@
 
 
-## Fix Table Width Rendering (Take 2)
+## Add Rich Bucket/Group Details
 
-### Root Cause
-The bucket containers (`rounded-xl border overflow-hidden`) clip their children because of `overflow-hidden`. Even though the inner grid rows have the correct `minWidth`, the parent containers don't respect it. The horizontal scroll wrapper only works if ALL content inside it has consistent minimum widths.
+Currently, buckets only store a name and color. This plan adds a **description** field and an **owner** field to buckets, along with a proper edit dialog to manage all bucket properties.
 
-### Solution
-Apply `minWidth` to the scrollable wrapper's inner content so everything expands together, rather than trying to set it on individual rows.
+### Database Changes
 
-### Changes
+**Migration: Add columns to `buckets` table**
+- `description TEXT DEFAULT ''` -- free-text notes about the group's purpose/scope
+- `owner_id UUID DEFAULT NULL` -- references a project member who leads this group
 
-**`src/components/TableView.tsx`**
-1. Wrap all content inside the `overflow-x-auto` div in a single inner div with `style={{ minWidth }}` -- this ensures the header, all bucket containers, and all rows expand to the same width together
-2. Remove `minWidth` from the individual header div (line 153) and bucket footer div (line 301) since the parent wrapper handles it
-3. Change bucket container from `overflow-hidden` to `overflow-visible` so content isn't clipped (keep `rounded-xl border shadow-sm`)
+### UI Changes
 
-**`src/components/TaskRow.tsx`**
-- Remove the per-row `minWidth: calcMinWidth(visibleColumnIds)` from the task row style (line 298) since the parent wrapper now handles it
-- Remove the `calcMinWidth` import since it's no longer needed here
+**1. Bucket Edit Dialog (`src/components/BucketDialog.tsx` -- new file)**
+- A dialog/sheet with fields for:
+  - Name (text input)
+  - Color (color picker or preset swatches)
+  - Description (textarea)
+  - Owner/Lead (dropdown of project members)
+- Opens when clicking "Edit Group" from the bucket's dropdown menu (replacing the inline rename)
 
-### Technical Details
-- The key insight: `overflow-x-auto` on the scroll container only works when there's a single inner element wider than the container. Currently, each row independently sets its own `minWidth` but the parent bucket divs have `overflow-hidden` which clips them.
-- By moving `minWidth` to one wrapper div inside the scroll container, everything scrolls together consistently.
-- The bucket border rounding can be preserved with `overflow: visible` since the scroll container handles the clipping.
+**2. Bucket Header Updates (`src/components/TableView.tsx`)**
+- Show owner avatar next to bucket name in the header row
+- Show truncated description as a subtitle below the bucket name (if set)
+- Add "Edit Group" option in the dropdown menu that opens the new dialog
+- Keep the existing "Rename Group" as a quick inline option
+
+### Data Layer Changes
+
+**3. Type Updates (`src/types/project.ts`)**
+- Add `description?: string` and `ownerId?: string | null` to the `Bucket` interface
+
+**4. Hook Updates (`src/hooks/useProjectData.ts`)**
+- Read `description` and `owner_id` from bucket rows
+- Map `owner_id` to an `Owner` object using the existing profile map
+- Update `updateBucket` to accept `description` and `owner_id` fields
+- Update `addBucket` to accept optional description/owner
+
+**5. Context Updates (`src/context/ProjectContext.tsx`)**
+- Expand the `updateBucket` signature to include the new fields
+
+### Summary of Files Changed
+| File | Action |
+|------|--------|
+| `supabase/migrations/` | New migration adding `description` and `owner_id` columns |
+| `src/types/project.ts` | Add fields to `Bucket` interface |
+| `src/hooks/useProjectData.ts` | Read/write new bucket fields |
+| `src/context/ProjectContext.tsx` | Update `updateBucket` type signature |
+| `src/components/BucketDialog.tsx` | New edit dialog component |
+| `src/components/TableView.tsx` | Wire up dialog, show description/owner in header |
+
