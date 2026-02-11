@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, 
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
+import { computeCriticalPath } from '@/lib/criticalPath';
 import { TaskRow } from './TaskRow';
 import { TaskDialog } from './TaskDialog';
 import { BucketDialog } from './BucketDialog';
@@ -53,6 +54,10 @@ export function TableView() {
   const [editDialogBucketId, setEditDialogBucketId] = useState<string | null>(null);
   const [newTaskBucketId, setNewTaskBucketId] = useState<string | null>(null);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(loadVisibleColumns);
+
+  // Compute slack days for all tasks
+  const allFlatTasks = useMemo(() => project.buckets.flatMap(b => flattenTasks(b.tasks)), [project.buckets]);
+  const { slackDays } = useMemo(() => computeCriticalPath(allFlatTasks), [allFlatTasks]);
 
   const toggleColumn = (colId: string) => {
     setVisibleColumnIds(prev => {
@@ -367,6 +372,7 @@ export function TableView() {
                                         dragHandleProps={dragProvided.dragHandleProps}
                                         gridCols={gridCols}
                                         visibleColumnIds={visibleColumnIds}
+                                        slackDays={slackDays}
                                       />
                                     </div>
                                   )}

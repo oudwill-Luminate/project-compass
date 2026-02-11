@@ -5,6 +5,7 @@ import {
 } from 'date-fns';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
+import { computeCriticalPath } from '@/lib/criticalPath';
 import { OwnerAvatar } from './OwnerAvatar';
 import { ChevronRight, ChevronDown, Shield, AlertTriangle } from 'lucide-react';
 import { Task, STATUS_CONFIG } from '@/types/project';
@@ -221,94 +222,8 @@ export function TimelineView() {
     project.buckets.flatMap(b => flattenTasks(b.tasks).map(t => ({ ...t, bucketName: b.name, bucketColor: b.color })))
   , [project.buckets]);
 
-  // Critical Path: forward/backward pass to find tasks with zero float
-  const criticalTaskIds = useMemo(() => {
-    const tasks = allTasks.filter(t => t.subTasks.length === 0); // leaf tasks only
-    if (tasks.length === 0) return new Set<string>();
-
-    const taskMap = new Map(tasks.map(t => [t.id, t]));
-
-    // Forward pass: ES and EF
-    const es = new Map<string, number>();
-    const ef = new Map<string, number>();
-
-    const getES = (id: string): number => {
-      if (es.has(id)) return es.get(id)!;
-      const t = taskMap.get(id)!;
-      const start = parseISO(t.startDate).getTime();
-      if (!t.dependsOn || !taskMap.has(t.dependsOn)) {
-        es.set(id, start);
-        return start;
-      }
-      const predEF = getEF(t.dependsOn);
-      const earliest = Math.max(start, predEF + 86400000); // +1 day
-      es.set(id, earliest);
-      return earliest;
-    };
-
-    const getEF = (id: string): number => {
-      if (ef.has(id)) return ef.get(id)!;
-      const t = taskMap.get(id)!;
-      const dur = differenceInDays(parseISO(t.endDate), parseISO(t.startDate));
-      const finish = getES(id) + dur * 86400000;
-      ef.set(id, finish);
-      return finish;
-    };
-
-    // Compute all forward pass values
-    tasks.forEach(t => getEF(t.id));
-
-    // Project end = max EF
-    const projectEnd = Math.max(...Array.from(ef.values()));
-
-    // Backward pass: LF and LS
-    const lf = new Map<string, number>();
-    const ls = new Map<string, number>();
-
-    // Find which tasks are depended on by others
-    const dependents = new Map<string, string[]>();
-    tasks.forEach(t => {
-      if (t.dependsOn && taskMap.has(t.dependsOn)) {
-        const deps = dependents.get(t.dependsOn) || [];
-        deps.push(t.id);
-        dependents.set(t.dependsOn, deps);
-      }
-    });
-
-    const getLF = (id: string): number => {
-      if (lf.has(id)) return lf.get(id)!;
-      const successors = dependents.get(id);
-      if (!successors || successors.length === 0) {
-        lf.set(id, projectEnd);
-        return projectEnd;
-      }
-      const latest = Math.min(...successors.map(sId => getLS(sId) - 86400000));
-      lf.set(id, latest);
-      return latest;
-    };
-
-    const getLS = (id: string): number => {
-      if (ls.has(id)) return ls.get(id)!;
-      const t = taskMap.get(id)!;
-      const dur = differenceInDays(parseISO(t.endDate), parseISO(t.startDate));
-      const start = getLF(id) - dur * 86400000;
-      ls.set(id, start);
-      return start;
-    };
-
-    tasks.forEach(t => getLS(t.id));
-
-    // Critical = float (LS - ES) === 0
-    const critical = new Set<string>();
-    tasks.forEach(t => {
-      const float = (ls.get(t.id)! - es.get(t.id)!);
-      if (Math.abs(float) < 86400000) { // within 1 day tolerance
-        critical.add(t.id);
-      }
-    });
-
-    return critical;
-  }, [allTasks]);
+  // Critical Path using shared utility
+  const { criticalTaskIds } = useMemo(() => computeCriticalPath(allTasks), [allTasks]);
 
   const { timelineStart, totalDays, weeks } = useMemo(() => {
     if (allTasks.length === 0) {
