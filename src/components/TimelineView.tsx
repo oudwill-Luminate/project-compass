@@ -110,8 +110,9 @@ function TaskTimelineRow({
                 }}
                 title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${showProgress ? ` (${prog}%)` : ''}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
               >
-                <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
-                  {task.title}
+                <span className="absolute inset-0 flex items-center justify-between px-2 text-[11px] text-white font-medium truncate">
+                  <span className="truncate">{task.title}</span>
+                  {showProgress && <span className="shrink-0 ml-1 opacity-90">{prog}%</span>}
                 </span>
               </div>
             );
