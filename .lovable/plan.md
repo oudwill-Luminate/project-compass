@@ -1,51 +1,66 @@
 
 
-## Quality Checklist Feature
+## Circular Dependency Detection and CMD+K Task Search
 
 ### Overview
-Add a "Quality Checklist" section to the Task Dialog where users can add, check off, and remove checklist items. When a task is marked as 100% complete (or status set to "Done"), all checklist items must be checked -- otherwise show a warning and prevent completion.
+Two improvements to project scheduling UX:
+1. **Circular dependency detection** -- When selecting a "Depends On" task in the TaskDialog, immediately check if it would create a loop (A depends on B depends on A). If so, show a destructive toast and revert the selection.
+2. **CMD+K / CTRL+K search** -- A global keyboard shortcut that opens a command palette to quickly search and jump to any task by name, opening its TaskDialog.
 
-### Database Changes
+---
 
-**New table: `checklist_items`**
-- `id` (uuid, PK, default gen_random_uuid())
-- `task_id` (uuid, NOT NULL, FK to tasks.id ON DELETE CASCADE)
-- `label` (text, NOT NULL)
-- `checked` (boolean, NOT NULL, default false)
-- `position` (integer, NOT NULL, default 0)
-- `created_at` (timestamptz, default now())
+### 1. Circular Dependency Detection (TaskDialog.tsx)
 
-**RLS policies** (using existing helper functions):
-- SELECT: `is_project_member(auth.uid(), get_project_id_from_task(task_id))`
-- INSERT/UPDATE/DELETE: `is_project_editor(auth.uid(), get_project_id_from_task(task_id))`
+**What changes:**
+- Add a `detectCircularDependency` helper function that walks the dependency chain from the selected predecessor. If it ever reaches back to the current task, a cycle exists.
+- Wrap the "Depends On" `onValueChange` handler to call this check before updating state. If circular, show an error toast and keep the previous value.
 
-### UI Changes (TaskDialog.tsx)
+**Logic:**
+```text
+function hasCircularDependency(taskId, proposedDependsOn, allTasks):
+    visited = { taskId }
+    current = proposedDependsOn
+    while current exists:
+        if current in visited -> return true (circular!)
+        visited.add(current)
+        current = allTasks.find(t => t.id === current).dependsOn
+    return false
+```
 
-1. **New "Quality Checklist" section** added between the Contingency Buffer and Risk Flag sections:
-   - Header with label and item count (e.g., "Quality Checklist (2/5)")
-   - List of items, each with a checkbox and label text
-   - A delete button (X icon) on each item to remove it
-   - An input + "Add" button at the bottom to add new items
+**File:** `src/components/TaskDialog.tsx`
+- Replace the `onValueChange` of the "Depends On" Select (around line 341) to run the circular check first, showing a destructive toast on failure.
 
-2. **Completion guard logic** in the save handler:
-   - When status is set to "Done" or progress slider reaches 100%, check if all checklist items are checked
-   - If unchecked items exist, show a toast warning: "Cannot mark as complete -- X checklist items are not done"
-   - Prevent the save from going through until all items are checked or the user lowers the progress/changes status
+---
 
-3. **Data fetching**: Load checklist items from the database when the dialog opens; save changes (add/remove/toggle) immediately via Supabase calls so items persist even if the user cancels the dialog.
+### 2. CMD+K Task Search (New Component + Index Integration)
+
+**New file:** `src/components/TaskSearchCommand.tsx`
+- Uses the existing `cmdk`-based `CommandDialog`, `CommandInput`, `CommandList`, `CommandItem`, `CommandEmpty` components from `src/components/ui/command.tsx`.
+- Lists all tasks (from `useProject().getAllTasks()`) filtered by the search query.
+- Selecting a task opens its `TaskDialog` for editing.
+
+**Global keyboard listener:**
+- In `src/pages/Index.tsx`, add a `useEffect` that listens for `CMD+K` (Mac) / `CTRL+K` (Windows) and toggles the search dialog open.
+
+**Files changed:**
+- `src/components/TaskSearchCommand.tsx` (new) -- Command palette component
+- `src/pages/Index.tsx` -- Add keyboard listener and render the search component
+
+---
 
 ### Technical Details
 
-```text
-TaskDialog
-  +-- useEffect: fetch checklist_items WHERE task_id = task.id
-  +-- checklistItems state: { id, label, checked, position }[]
-  +-- addItem(label): INSERT into checklist_items, update local state
-  +-- toggleItem(id): UPDATE checked in DB, update local state
-  +-- removeItem(id): DELETE from DB, update local state
-  +-- handleSave: if status=done or progress=100, verify all checked
-```
+**Circular detection in TaskDialog.tsx:**
+- The helper uses `getAllTasks()` already available in the component.
+- Walks the `dependsOn` chain with a visited set to detect cycles in O(n) time.
+- On detection: `toast({ title: 'Error: Circular Dependency', description: '...', variant: 'destructive' })` and the Select value stays unchanged.
 
-### Files to Change
-- **New migration**: Create `checklist_items` table with RLS
-- **`src/components/TaskDialog.tsx`**: Add checklist UI section, fetch/mutate checklist items, add completion validation logic
+**TaskSearchCommand.tsx:**
+- Accepts `open` / `onOpenChange` props and an `onSelectTask(task: Task)` callback.
+- Groups tasks or shows them flat with status/owner badges for quick identification.
+- The selected task opens a TaskDialog inline.
+
+**Index.tsx integration:**
+- `useEffect` with `keydown` listener for `(e.metaKey || e.ctrlKey) && e.key === 'k'` -- calls `e.preventDefault()` and toggles state.
+- Renders `<TaskSearchCommand>` at the page level so it works across all views.
+
