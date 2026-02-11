@@ -37,6 +37,8 @@ interface TaskRow {
   risk_probability: number;
   position: number;
   parent_task_id: string | null;
+  buffer_days: number;
+  buffer_position: string;
 }
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
@@ -67,6 +69,8 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       riskImpact: t.risk_impact,
       riskProbability: t.risk_probability,
       parentTaskId: t.parent_task_id,
+      bufferDays: t.buffer_days || 0,
+      bufferPosition: (t.buffer_position === 'start' ? 'start' : 'end') as 'start' | 'end',
       subTasks: [],
     });
   }
@@ -140,42 +144,48 @@ function addSubTaskToTree(tasks: Task[], parentTaskId: string, newTask: Task): T
   });
 }
 
-/** Calculate new dates for a dependent task based on dependency type, preserving duration */
+/** Calculate new dates for a dependent task based on dependency type, preserving duration.
+ *  Buffer is factored in: for FS/FF the predecessor's end buffer extends the effective end date,
+ *  for SS/SF the predecessor's start buffer shifts the effective start date earlier. */
 function scheduleTask(
-  predecessor: { startDate: string; endDate: string },
+  predecessor: { startDate: string; endDate: string; bufferDays?: number; bufferPosition?: 'start' | 'end' },
   dependent: { startDate: string; endDate: string },
   depType: DependencyType
 ): { startDate: string; endDate: string } {
   const duration = differenceInDays(parseISO(dependent.endDate), parseISO(dependent.startDate));
+  const bufferDays = predecessor.bufferDays || 0;
+  const bufferPos = predecessor.bufferPosition || 'end';
+
+  // Effective dates accounting for buffer
+  const effectiveEnd = bufferPos === 'end'
+    ? addDays(parseISO(predecessor.endDate), bufferDays)
+    : parseISO(predecessor.endDate);
+  const effectiveStart = bufferPos === 'start'
+    ? addDays(parseISO(predecessor.startDate), -bufferDays)
+    : parseISO(predecessor.startDate);
 
   switch (depType) {
     case 'FS': {
-      // Dependent starts after predecessor finishes
-      const newStart = addDays(parseISO(predecessor.endDate), 1);
+      const newStart = addDays(effectiveEnd, 1);
       return {
         startDate: format(newStart, 'yyyy-MM-dd'),
         endDate: format(addDays(newStart, duration), 'yyyy-MM-dd'),
       };
     }
     case 'FF': {
-      // Both finish at the same time
-      const newEnd = parseISO(predecessor.endDate);
       return {
-        startDate: format(addDays(newEnd, -duration), 'yyyy-MM-dd'),
-        endDate: format(newEnd, 'yyyy-MM-dd'),
+        startDate: format(addDays(effectiveEnd, -duration), 'yyyy-MM-dd'),
+        endDate: format(effectiveEnd, 'yyyy-MM-dd'),
       };
     }
     case 'SS': {
-      // Both start at the same time
-      const newStart = parseISO(predecessor.startDate);
       return {
-        startDate: format(newStart, 'yyyy-MM-dd'),
-        endDate: format(addDays(newStart, duration), 'yyyy-MM-dd'),
+        startDate: format(effectiveStart, 'yyyy-MM-dd'),
+        endDate: format(addDays(effectiveStart, duration), 'yyyy-MM-dd'),
       };
     }
     case 'SF': {
-      // Dependent finishes when predecessor starts
-      const newEnd = addDays(parseISO(predecessor.startDate), -1);
+      const newEnd = addDays(effectiveStart, -1);
       return {
         startDate: format(addDays(newEnd, -duration), 'yyyy-MM-dd'),
         endDate: format(newEnd, 'yyyy-MM-dd'),
@@ -345,6 +355,8 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.riskImpact !== undefined) dbUpdates.risk_impact = updates.riskImpact;
     if (updates.riskProbability !== undefined) dbUpdates.risk_probability = updates.riskProbability;
     if (updates.parentTaskId !== undefined) dbUpdates.parent_task_id = updates.parentTaskId;
+    if (updates.bufferDays !== undefined) dbUpdates.buffer_days = updates.bufferDays;
+    if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
@@ -452,6 +464,8 @@ export function useProjectData(projectId: string | undefined) {
       dependsOn: null,
       dependencyType: 'FS',
       flaggedAsRisk: false,
+      bufferDays: 0,
+      bufferPosition: 'end',
       riskImpact: 1,
       riskProbability: 1,
       parentTaskId: parentTaskId || null,

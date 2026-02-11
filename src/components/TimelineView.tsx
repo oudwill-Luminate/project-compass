@@ -6,7 +6,7 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, Shield } from 'lucide-react';
 import { Task, STATUS_CONFIG } from '@/types/project';
 
 function TaskTimelineRow({
@@ -88,12 +88,45 @@ function TaskTimelineRow({
               width: pos.width,
               backgroundColor: statusColor,
             }}
-            title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}`}
+            title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
           >
             <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
               {task.title}
             </span>
           </div>
+          {/* Buffer Bar */}
+          {!hasSubTasks && task.bufferDays > 0 && (() => {
+            const bufferWidth = (task.bufferDays / totalDays) * 100;
+            if (task.bufferPosition === 'end') {
+              const coreEndPct = (differenceInDays(parseISO(displayEnd), timelineStart) + 1) / totalDays * 100;
+              return (
+                <div
+                  className="absolute top-2.5 h-7 rounded-r-md opacity-40"
+                  style={{
+                    left: `${coreEndPct}%`,
+                    width: `${bufferWidth}%`,
+                    backgroundColor: statusColor,
+                    backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,0.3) 3px, rgba(255,255,255,0.3) 6px)',
+                  }}
+                  title={`Buffer: ${task.bufferDays} days (end)`}
+                />
+              );
+            } else {
+              const bufferStartPct = (differenceInDays(parseISO(displayStart), timelineStart) - task.bufferDays) / totalDays * 100;
+              return (
+                <div
+                  className="absolute top-2.5 h-7 rounded-l-md opacity-40"
+                  style={{
+                    left: `${Math.max(bufferStartPct, 0)}%`,
+                    width: `${bufferWidth}%`,
+                    backgroundColor: statusColor,
+                    backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,0.3) 3px, rgba(255,255,255,0.3) 6px)',
+                  }}
+                  title={`Buffer: ${task.bufferDays} days (start)`}
+                />
+              );
+            }
+          })()}
           {/* Today Line */}
           {todayPercent > 0 && todayPercent < 100 && (
             <div

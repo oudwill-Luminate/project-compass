@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield } from 'lucide-react';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
@@ -168,12 +168,18 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
           <OwnerAvatar owner={task.owner} />
         </div>
 
-        <span className="text-muted-foreground text-xs">
+        <span className="text-muted-foreground text-xs flex items-center gap-1">
           {format(parseISO(rolled.startDate), 'MMM dd')}
+          {task.bufferDays > 0 && task.bufferPosition === 'start' && (
+            <span title={`${task.bufferDays}d buffer (start)`}><Shield className="w-3 h-3 text-primary" /></span>
+          )}
         </span>
 
-        <span className="text-muted-foreground text-xs">
+        <span className="text-muted-foreground text-xs flex items-center gap-1">
           {format(parseISO(rolled.endDate), 'MMM dd')}
+          {task.bufferDays > 0 && task.bufferPosition === 'end' && (
+            <span title={`${task.bufferDays}d buffer (end)`}><Shield className="w-3 h-3 text-primary" /></span>
+          )}
         </span>
 
         <span className="text-right font-medium tabular-nums">
