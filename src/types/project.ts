@@ -46,11 +46,20 @@ export interface Bucket {
   tasks: Task[];
 }
 
+export interface ProjectGoal {
+  id: string;
+  projectId: string;
+  title: string;
+  progress: number;
+  position: number;
+}
+
 export interface Project {
   id: string;
   name: string;
   contingencyPercent: number;
   includeWeekends: boolean;
+  charterMarkdown: string;
   buckets: Bucket[];
 }
 

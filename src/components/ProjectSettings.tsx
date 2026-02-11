@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/context/ProjectContext';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -20,13 +22,19 @@ import { toast } from 'sonner';
 import { Settings, Trash2 } from 'lucide-react';
 
 export function ProjectSettings() {
-  const { project, updateProjectName, updateContingency, updateIncludeWeekends, deleteProject } = useProject();
+  const { project, updateProjectName, updateContingency, updateIncludeWeekends, deleteProject, members } = useProject();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState(project.name);
   const [contingency, setContingency] = useState(String(project.contingencyPercent));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Hourly rate for current user
+  const currentMember = members.find(m => m.user_id === user?.id);
+  const [hourlyRate, setHourlyRate] = useState(String(currentMember?.profile?.hourly_rate || 0));
+  const [savingRate, setSavingRate] = useState(false);
 
   const hasChanges = name !== project.name || contingency !== String(project.contingencyPercent);
 
@@ -110,6 +118,47 @@ export function ProjectSettings() {
             {saving ? 'Saving…' : 'Save Changes'}
           </Button>
         </div>
+
+        {/* Hourly Rate */}
+        {user && (
+          <div className="space-y-2 border-t border-border pt-6">
+            <h3 className="text-sm font-semibold">Your Hourly Rate</h3>
+            <p className="text-xs text-muted-foreground">
+              Used to auto-calculate estimated cost when effort hours are set and no manual cost is entered.
+            </p>
+            <div className="flex gap-2 items-end">
+              <div className="space-y-1">
+                <Label htmlFor="hourly-rate">Hourly Rate ($)</Label>
+                <Input
+                  id="hourly-rate"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={hourlyRate}
+                  onChange={e => setHourlyRate(e.target.value)}
+                  className="w-40"
+                />
+              </div>
+              <Button
+                size="sm"
+                disabled={savingRate}
+                onClick={async () => {
+                  setSavingRate(true);
+                  try {
+                    await supabase.from('profiles').update({ hourly_rate: Number(hourlyRate) } as any).eq('id', user.id);
+                    toast.success('Hourly rate saved');
+                  } catch {
+                    toast.error('Failed to save rate');
+                  } finally {
+                    setSavingRate(false);
+                  }
+                }}
+              >
+                {savingRate ? 'Saving…' : 'Save Rate'}
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="border-t border-border pt-6 space-y-3">
           <h3 className="text-sm font-semibold text-destructive">Danger Zone</h3>
