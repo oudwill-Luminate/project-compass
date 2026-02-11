@@ -67,6 +67,7 @@ export function TableView() {
     riskImpact: 1,
     riskProbability: 1,
     parentTaskId: null,
+    responsible: null,
     subTasks: [],
   };
 
@@ -96,12 +97,13 @@ export function TableView() {
 
         {/* Column Headers */}
         <div className="sticky top-0 z-10 bg-background border-b">
-          <div className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <div className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
             <span></span>
             <span>Task</span>
             <span>Status</span>
             <span>Priority</span>
             <span>Owner</span>
+            <span>Responsible</span>
             <span>Start</span>
             <span>End</span>
             <span className="text-right">Est. Cost</span>
@@ -237,14 +239,14 @@ export function TableView() {
 
                         {/* Bucket Footer */}
                         <div
-                          className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
+                          className="grid grid-cols-[24px_1fr_140px_100px_100px_110px_110px_110px_110px_110px_50px] gap-0 px-4 py-2.5 bg-muted/30 border-t text-sm"
                           style={{ borderLeft: `4px solid ${bucket.color}` }}
                         >
                           <span></span>
                           <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
                             Subtotal
                           </span>
-                          <span></span><span></span><span></span><span></span><span></span>
+                          <span></span><span></span><span></span><span></span><span></span><span></span>
                           <span className="text-right font-bold tabular-nums">
                             ${bucketEstimated.toLocaleString()}
                           </span>

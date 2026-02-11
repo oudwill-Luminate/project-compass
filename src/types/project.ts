@@ -26,6 +26,7 @@ export interface Task {
   parentTaskId: string | null;
   bufferDays: number;
   bufferPosition: 'start' | 'end';
+  responsible: string | null;
   subTasks: Task[];
 }
 

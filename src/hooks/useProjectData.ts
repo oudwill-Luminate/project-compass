@@ -39,6 +39,7 @@ interface TaskRow {
   parent_task_id: string | null;
   buffer_days: number;
   buffer_position: string;
+  responsible: string | null;
 }
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
@@ -71,6 +72,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       parentTaskId: t.parent_task_id,
       bufferDays: t.buffer_days || 0,
       bufferPosition: (t.buffer_position === 'start' ? 'start' : 'end') as 'start' | 'end',
+      responsible: t.responsible || null,
       subTasks: [],
     });
   }
@@ -357,6 +359,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.parentTaskId !== undefined) dbUpdates.parent_task_id = updates.parentTaskId;
     if (updates.bufferDays !== undefined) dbUpdates.buffer_days = updates.bufferDays;
     if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
+    if (updates.responsible !== undefined) dbUpdates.responsible = updates.responsible;
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
@@ -466,6 +469,7 @@ export function useProjectData(projectId: string | undefined) {
       flaggedAsRisk: false,
       bufferDays: 0,
       bufferPosition: 'end',
+      responsible: null,
       riskImpact: 1,
       riskProbability: 1,
       parentTaskId: parentTaskId || null,
@@ -530,6 +534,7 @@ export function useProjectData(projectId: string | undefined) {
       risk_probability: taskData.riskProbability,
       buffer_days: taskData.bufferDays,
       buffer_position: taskData.bufferPosition,
+      responsible: taskData.responsible || null,
       parent_task_id: taskData.parentTaskId || null,
       position,
     });
