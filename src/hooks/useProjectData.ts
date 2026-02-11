@@ -626,5 +626,23 @@ export function useProjectData(projectId: string | undefined) {
     if (error) console.error('deleteTask error:', error);
   }, []);
 
-  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, refetch: fetchAll, profiles, toOwner };
+  const updateProjectName = useCallback(async (name: string) => {
+    if (!projectId) return;
+    setProject(prev => prev ? { ...prev, name } : prev);
+    await supabase.from('projects').update({ name }).eq('id', projectId);
+  }, [projectId]);
+
+  const deleteProject = useCallback(async () => {
+    if (!projectId) return;
+    // Delete all tasks in all buckets first
+    const bucketIds = project?.buckets.map(b => b.id) || [];
+    if (bucketIds.length > 0) {
+      await supabase.from('tasks').delete().in('bucket_id', bucketIds);
+    }
+    await supabase.from('buckets').delete().eq('project_id', projectId);
+    await supabase.from('project_members').delete().eq('project_id', projectId);
+    await supabase.from('projects').delete().eq('id', projectId);
+  }, [projectId, project]);
+
+  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, refetch: fetchAll, profiles, toOwner };
 }

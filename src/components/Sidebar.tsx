@@ -8,6 +8,7 @@ const navItems = [
   { id: 'table' as const, label: 'Table View', icon: LayoutGrid },
   { id: 'timeline' as const, label: 'Timeline', icon: GanttChart },
   { id: 'risk' as const, label: 'Risk Registry', icon: AlertTriangle },
+  { id: 'settings' as const, label: 'Settings', icon: Settings },
 ];
 
 export function Sidebar() {
@@ -64,12 +65,8 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-sidebar-border">
-        <div className="flex items-center gap-2 text-[11px] text-sidebar-foreground/40 mb-1.5">
-          <Settings className="w-3.5 h-3.5" />
-          <span className="font-medium uppercase tracking-wider">Contingency</span>
-        </div>
-        <p className="text-lg font-bold text-sidebar-foreground px-5">
-          {project.contingencyPercent}%
+        <p className="text-[11px] text-sidebar-foreground/40 font-medium">
+          Contingency: <span className="text-sidebar-foreground">{project.contingencyPercent}%</span>
         </p>
       </div>
     </aside>
