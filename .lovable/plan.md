@@ -1,33 +1,40 @@
 
 
-## Add Bucket and Task Creation
+## Make All Changes Instant with Optimistic Updates
 
-Currently the app can display and edit tasks/buckets but has no way to create them. This plan adds "Add Bucket" and "Add Task" functionality.
+Right now, every change (renaming a bucket, adding a task, updating a task, deleting, moving) writes to the database and then waits for the realtime subscription to trigger a full re-fetch of all data. This round-trip causes a noticeable delay.
 
-### What you'll get
+The fix is **optimistic updates** -- update the local state immediately so the UI reflects changes instantly, then persist to the database in the background.
 
-- An **"+ Add Group"** button below the last bucket in the table view to create new work breakdown groups
-- An **"+ Add Task"** button at the bottom of each bucket to add tasks within that group
-- Both will insert directly into the database and auto-refresh via the existing realtime subscription
+### Changes
 
-### Technical Details
+**`src/hooks/useProjectData.ts`** -- Add optimistic local state updates to every mutation:
 
-**1. `src/hooks/useProjectData.ts`** -- Add two new functions:
+- **`updateBucket`**: Immediately update the bucket's name/color in the local `project` state, then persist to DB
+- **`addBucket`**: Generate a temporary ID, add the bucket to local state instantly, then insert into DB and replace the temp ID on the realtime refresh
+- **`deleteBucket`**: Remove the bucket from local state immediately, then delete from DB
+- **`addTask`**: Add a new task with defaults to the local bucket state instantly, then insert into DB
+- **`deleteTask`**: Remove the task from local state immediately, then delete from DB
+- **`moveTask`**: Move the task between buckets in local state immediately, then update DB
+- **`updateTask`**: Apply all field changes to the local task state immediately before writing to DB
+- **`updateContingency`**: Update local project contingency immediately
 
-- `addBucket(name: string)`: Inserts a new row into the `buckets` table with the project ID, name, a default color, and a position based on existing bucket count
-- `addTask(bucketId: string, title: string)`: Inserts a new row into the `tasks` table with the bucket ID, title, and sensible defaults (status: not-started, priority: medium, owner set to current user, dates defaulting to today + 7 days)
-- Return both from the hook
+Each function will call `setProject()` with the optimistically updated state before making the async database call. The realtime subscription will still fire and reconcile, but the user sees the change instantly.
 
-**2. `src/context/ProjectContext.tsx`** -- Expose the new functions:
+### Technical approach
 
-- Add `addBucket` and `addTask` to the context type and provider value
-- Wire them through from the hook
+```text
+User Action
+    |
+    v
+Update local state (setProject)  <-- instant UI update
+    |
+    v
+Write to Supabase (async)        <-- background persistence
+    |
+    v
+Realtime subscription fires      <-- reconciles with server truth
+```
 
-**3. `src/components/TableView.tsx`** -- Add creation UI:
-
-- After the last bucket, add an **"+ Add Group"** button with an inline text input (click to reveal input, Enter to submit, Escape to cancel)
-- Inside each bucket (after the task rows, before the subtotal footer), add an **"+ Add Task"** button with similar inline input behavior
-- Style these subtly to match the existing design -- muted text, small font, hover highlight
-
-**4. No database changes needed** -- The existing `buckets` and `tasks` tables along with their RLS policies (editors can create) already support inserts for authenticated project editors.
+No new files or dependencies needed. All changes are within `useProjectData.ts`.
 
