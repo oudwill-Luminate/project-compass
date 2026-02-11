@@ -150,6 +150,7 @@ export type Database = {
           flagged_as_risk: boolean
           id: string
           owner_id: string | null
+          parent_task_id: string | null
           position: number
           priority: Database["public"]["Enums"]["task_priority"]
           risk_impact: number
@@ -170,6 +171,7 @@ export type Database = {
           flagged_as_risk?: boolean
           id?: string
           owner_id?: string | null
+          parent_task_id?: string | null
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
           risk_impact?: number
@@ -190,6 +192,7 @@ export type Database = {
           flagged_as_risk?: boolean
           id?: string
           owner_id?: string | null
+          parent_task_id?: string | null
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
           risk_impact?: number
@@ -210,6 +213,13 @@ export type Database = {
           {
             foreignKeyName: "tasks_depends_on_fkey"
             columns: ["depends_on"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
             isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]

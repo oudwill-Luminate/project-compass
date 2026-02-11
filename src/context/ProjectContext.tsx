@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Project, Task } from '@/types/project';
-import { useProjectData } from '@/hooks/useProjectData';
+import { useProjectData, flattenTasks } from '@/hooks/useProjectData';
 
 type ViewType = 'table' | 'timeline' | 'risk';
 
@@ -14,7 +14,7 @@ interface ProjectContextType {
   addBucket: (name: string) => void;
   updateBucket: (bucketId: string, updates: { name?: string; color?: string }) => void;
   deleteBucket: (bucketId: string) => void;
-  addTask: (bucketId: string, title: string) => void;
+  addTask: (bucketId: string, title: string, parentTaskId?: string) => void;
   moveTask: (taskId: string, newBucketId: string, newPosition: number) => void;
   deleteTask: (taskId: string) => void;
   getAllTasks: () => Task[];
@@ -42,7 +42,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     : { id: '', name: '', contingencyPercent: 10, buckets: [] };
 
   const getAllTasks = useCallback(() => {
-    return projectWithCollapsed.buckets.flatMap(b => b.tasks);
+    return projectWithCollapsed.buckets.flatMap(b => flattenTasks(b.tasks));
   }, [projectWithCollapsed]);
 
   const getTaskById = useCallback((taskId: string) => {
