@@ -18,6 +18,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { id: 'estCost', label: 'Est. Cost', width: '110px', align: 'right' },
   { id: 'actual', label: 'Actual', width: '110px', align: 'right' },
   { id: 'slippage', label: 'Slippage', width: '90px', align: 'right' },
+  { id: 'checklist', label: 'Checklist', width: '80px' },
   { id: 'actions', label: '', width: '50px', locked: true },
 ];
 
