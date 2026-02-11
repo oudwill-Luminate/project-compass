@@ -144,6 +144,41 @@ export type Database = {
         }
         Relationships: []
       }
+      risk_actions: {
+        Row: {
+          action_type: Database["public"]["Enums"]["risk_action_type"]
+          created_at: string
+          description: string
+          id: string
+          task_id: string
+          updated_at: string
+        }
+        Insert: {
+          action_type: Database["public"]["Enums"]["risk_action_type"]
+          created_at?: string
+          description?: string
+          id?: string
+          task_id: string
+          updated_at?: string
+        }
+        Update: {
+          action_type?: Database["public"]["Enums"]["risk_action_type"]
+          created_at?: string
+          description?: string
+          id?: string
+          task_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "risk_actions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       risk_snapshots: {
         Row: {
           created_at: string
@@ -314,6 +349,7 @@ export type Database = {
     Enums: {
       dependency_type: "FS" | "FF" | "SS" | "SF"
       project_role: "owner" | "editor" | "viewer"
+      risk_action_type: "mitigation" | "contingency"
       task_priority: "critical" | "high" | "medium" | "low"
       task_status: "done" | "working" | "stuck" | "not-started"
     }
@@ -445,6 +481,7 @@ export const Constants = {
     Enums: {
       dependency_type: ["FS", "FF", "SS", "SF"],
       project_role: ["owner", "editor", "viewer"],
+      risk_action_type: ["mitigation", "contingency"],
       task_priority: ["critical", "high", "medium", "low"],
       task_status: ["done", "working", "stuck", "not-started"],
     },
