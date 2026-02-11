@@ -61,8 +61,11 @@ interface TaskRowProps {
   visibleColumnIds: string[];
 }
 
-export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProps, gridCols, visibleColumnIds }: TaskRowProps) {
+export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProps, gridCols: gridColsProp, visibleColumnIds: visibleColsProp }: TaskRowProps) {
   const { updateTask, deleteTask, getTaskById, addTask } = useProject();
+  const defaultColIds = ['drag','task','status','priority','owner','responsible','start','end','estCost','actual','actions'];
+  const visibleColumnIds = visibleColsProp ?? defaultColIds;
+  const gridCols = gridColsProp ?? '24px minmax(200px,1fr) 140px 100px 100px 120px 110px 110px 110px 110px 50px';
   const [editOpen, setEditOpen] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [addingSubTask, setAddingSubTask] = useState(false);
@@ -75,7 +78,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
   const priorityConfig = PRIORITY_CONFIG[task.priority];
   const dependsOnTask = task.dependsOn ? getTaskById(task.dependsOn) : null;
 
-  const show = (id: string) => visibleColumnIds.includes(id);
+  const show = (id: string) => (visibleColumnIds ?? []).includes(id);
 
   const cycleStatus = () => {
     if (hasSubTasks) return;
