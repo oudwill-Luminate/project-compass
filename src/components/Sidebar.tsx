@@ -1,10 +1,11 @@
-import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft, Users, Search } from 'lucide-react';
+import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft, Users, Search, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
 
 const navItems = [
+  { id: 'overview' as const, label: 'Overview', icon: FileText },
   { id: 'table' as const, label: 'Table View', icon: LayoutGrid },
   { id: 'timeline' as const, label: 'Timeline', icon: GanttChart },
   { id: 'workload' as const, label: 'Workload', icon: Users },

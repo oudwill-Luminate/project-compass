@@ -98,6 +98,7 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           display_name: string
+          hourly_rate: number
           id: string
           job_title: string | null
           updated_at: string
@@ -106,6 +107,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           display_name?: string
+          hourly_rate?: number
           id: string
           job_title?: string | null
           updated_at?: string
@@ -114,11 +116,50 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           display_name?: string
+          hourly_rate?: number
           id?: string
           job_title?: string | null
           updated_at?: string
         }
         Relationships: []
+      }
+      project_goals: {
+        Row: {
+          created_at: string
+          id: string
+          position: number
+          progress: number
+          project_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          position?: number
+          progress?: number
+          project_id: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          position?: number
+          progress?: number
+          project_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_goals_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       project_members: {
         Row: {
@@ -154,6 +195,7 @@ export type Database = {
       }
       projects: {
         Row: {
+          charter_markdown: string
           contingency_percent: number
           created_at: string
           created_by: string
@@ -163,6 +205,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          charter_markdown?: string
           contingency_percent?: number
           created_at?: string
           created_by: string
@@ -172,6 +215,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          charter_markdown?: string
           contingency_percent?: number
           created_at?: string
           created_by?: string

@@ -30,6 +30,7 @@ const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTask
 export const mockProject: Project = {
   id: 'p1',
   name: 'Software Launch v2.0',
+  charterMarkdown: '',
   includeWeekends: false,
   contingencyPercent: 10,
   buckets: [

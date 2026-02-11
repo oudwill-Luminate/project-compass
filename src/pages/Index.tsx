@@ -8,6 +8,7 @@ import { TimelineView } from '@/components/TimelineView';
 import { RiskRegistry } from '@/components/RiskRegistry';
 import { WorkloadView } from '@/components/WorkloadView';
 import { ProjectSettings } from '@/components/ProjectSettings';
+import { ProjectOverview } from '@/components/ProjectOverview';
 import { TaskSearchCommand } from '@/components/TaskSearchCommand';
 import { Loader2 } from 'lucide-react';
 
@@ -32,6 +33,7 @@ function ProjectContent() {
         transition={{ duration: 0.15, ease: 'easeOut' }}
         className="flex-1 flex flex-col overflow-hidden"
       >
+        {activeView === 'overview' && <ProjectOverview />}
         {activeView === 'table' && <TableView />}
         {activeView === 'timeline' && <TimelineView />}
         {activeView === 'workload' && <WorkloadView />}

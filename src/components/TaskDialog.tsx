@@ -341,19 +341,23 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                 onValueChange={v => {
                   const newDep = v === 'none' ? null : v;
                   if (newDep) {
-                    // Circular dependency detection
+                    // Circular dependency detection with path
                     const allTasks = getAllTasks();
+                    const chain: string[] = [task.id];
                     const visited = new Set<string>([task.id]);
                     let current: string | null = newDep;
                     let circular = false;
                     while (current) {
-                      if (visited.has(current)) { circular = true; break; }
+                      chain.push(current);
+                      if (current === task.id) { circular = true; break; }
+                      if (visited.has(current)) break;
                       visited.add(current);
                       const t = allTasks.find(t => t.id === current);
                       current = t?.dependsOn || null;
                     }
                     if (circular) {
-                      toast({ title: 'Error: Circular Dependency', description: 'This dependency would create a loop. Please choose a different task.', variant: 'destructive' });
+                      const names = chain.map(id => allTasks.find(t => t.id === id)?.title || 'Unknown').join(' → ');
+                      toast({ title: 'Circular Dependency', description: names, variant: 'destructive' });
                       return;
                     }
                   }

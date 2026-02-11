@@ -10,6 +10,7 @@ interface ProfileRow {
   display_name: string;
   avatar_url: string | null;
   job_title: string;
+  hourly_rate: number;
 }
 
 interface BucketRow {
@@ -71,7 +72,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
         : { id: 'unknown', name: 'Unassigned', color: '#999' },
       startDate: t.start_date,
       endDate: t.end_date,
-      estimatedCost: Number(t.estimated_cost),
+      estimatedCost: Number(t.estimated_cost) || (Number(t.effort_hours) > 0 && ownerId && profileMap[ownerId]?.hourly_rate > 0 ? Number(t.effort_hours) * profileMap[ownerId].hourly_rate : 0),
       actualCost: Number(t.actual_cost),
       dependsOn: t.depends_on,
       dependencyType: (t.dependency_type || 'FS') as DependencyType,
@@ -161,22 +162,25 @@ function addSubTaskToTree(tasks: Task[], parentTaskId: string, newTask: Task): T
   });
 }
 
-/** Detect circular dependency: walk the chain from proposedDependsOn and check if we reach taskId */
+/** Detect circular dependency: walk the chain from proposedDependsOn and check if we reach taskId.
+ *  Returns the chain of task IDs in the cycle, or null if no cycle. */
 function detectCircularDependency(
   taskId: string,
   proposedDependsOn: string,
   allTasks: Task[]
-): boolean {
+): string[] | null {
+  const chain: string[] = [taskId];
   const visited = new Set<string>();
   let current: string | null = proposedDependsOn;
   while (current) {
-    if (current === taskId) return true;
+    chain.push(current);
+    if (current === taskId) return chain;
     if (visited.has(current)) break;
     visited.add(current);
     const task = allTasks.find(t => t.id === current);
     current = task?.dependsOn ?? null;
   }
-  return false;
+  return null;
 }
 
 /** Add working days, skipping weekends when includeWeekends is false */
@@ -346,6 +350,7 @@ export function useProjectData(projectId: string | undefined) {
       name: projData.name,
       contingencyPercent: Number(projData.contingency_percent),
       includeWeekends: projData.include_weekends ?? false,
+      charterMarkdown: projData.charter_markdown || '',
       buckets,
     };
 
@@ -354,7 +359,7 @@ export function useProjectData(projectId: string | undefined) {
       id: m.id,
       user_id: m.user_id,
       role: m.role,
-      profile: profileMap[m.user_id] || { id: m.user_id, display_name: 'Unknown', avatar_url: null, job_title: '' },
+      profile: profileMap[m.user_id] || { id: m.user_id, display_name: 'Unknown', avatar_url: null, job_title: '', hourly_rate: 0 } as ProfileRow,
     })));
     setLoading(false);
   }, [projectId, user]);
@@ -394,8 +399,10 @@ export function useProjectData(projectId: string | undefined) {
 
       if (predecessorId) {
         // Circular dependency check
-        if (detectCircularDependency(taskId, predecessorId, allTasks)) {
-          toast.error('Circular dependency detected. This dependency would create a loop.');
+        const cycle = detectCircularDependency(taskId, predecessorId, allTasks);
+        if (cycle) {
+          const names = cycle.map(id => allTasks.find(t => t.id === id)?.title || 'Unknown').join(' → ');
+          toast.error(`Circular dependency: ${names}`);
           return;
         }
 
@@ -802,5 +809,53 @@ export function useProjectData(projectId: string | undefined) {
     toast.success('Baseline cleared');
   }, [project]);
 
-  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, profiles, toOwner };
+  // Charter
+  const updateCharter = useCallback(async (markdown: string) => {
+    if (!projectId) return;
+    setProject(prev => prev ? { ...prev, charterMarkdown: markdown } : prev);
+    await supabase.from('projects').update({ charter_markdown: markdown } as any).eq('id', projectId);
+  }, [projectId]);
+
+  // Goals
+  const [goals, setGoals] = useState<import('@/types/project').ProjectGoal[]>([]);
+
+  const fetchGoals = useCallback(async () => {
+    if (!projectId) return;
+    const { data } = await supabase
+      .from('project_goals' as any)
+      .select('*')
+      .eq('project_id', projectId)
+      .order('position');
+    if (data) {
+      setGoals((data as any[]).map(g => ({
+        id: g.id, projectId: g.project_id, title: g.title,
+        progress: g.progress, position: g.position,
+      })));
+    }
+  }, [projectId]);
+
+  useEffect(() => { fetchGoals(); }, [fetchGoals]);
+
+  const addGoal = useCallback(async (title: string) => {
+    if (!projectId) return;
+    const position = goals.length;
+    await supabase.from('project_goals' as any).insert({ project_id: projectId, title, position } as any);
+    fetchGoals();
+  }, [projectId, goals.length, fetchGoals]);
+
+  const updateGoal = useCallback(async (goalId: string, updates: Partial<import('@/types/project').ProjectGoal>) => {
+    const dbUpdates: any = {};
+    if (updates.title !== undefined) dbUpdates.title = updates.title;
+    if (updates.progress !== undefined) dbUpdates.progress = updates.progress;
+    if (updates.position !== undefined) dbUpdates.position = updates.position;
+    setGoals(prev => prev.map(g => g.id === goalId ? { ...g, ...updates } : g));
+    await supabase.from('project_goals' as any).update(dbUpdates).eq('id', goalId);
+  }, []);
+
+  const deleteGoal = useCallback(async (goalId: string) => {
+    setGoals(prev => prev.filter(g => g.id !== goalId));
+    await supabase.from('project_goals' as any).delete().eq('id', goalId);
+  }, []);
+
+  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, profiles, toOwner, updateCharter, goals, addGoal, updateGoal, deleteGoal };
 }

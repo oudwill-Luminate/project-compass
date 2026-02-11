@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { Project, Task } from '@/types/project';
+import { Project, Task, ProjectGoal } from '@/types/project';
 import { useProjectData, flattenTasks } from '@/hooks/useProjectData';
 
-type ViewType = 'table' | 'timeline' | 'risk' | 'workload' | 'settings';
+type ViewType = 'overview' | 'table' | 'timeline' | 'risk' | 'workload' | 'settings';
 
 interface ProjectContextType {
   project: Project;
@@ -26,6 +26,11 @@ interface ProjectContextType {
   getTaskById: (taskId: string) => Task | undefined;
   setBaseline: () => Promise<void>;
   clearBaseline: () => Promise<void>;
+  updateCharter: (markdown: string) => Promise<void>;
+  goals: ProjectGoal[];
+  addGoal: (title: string) => Promise<void>;
+  updateGoal: (goalId: string, updates: Partial<ProjectGoal>) => Promise<void>;
+  deleteGoal: (goalId: string) => Promise<void>;
   loading: boolean;
   members: { id: string; user_id: string; role: string; profile: any }[];
 }
@@ -33,7 +38,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask, setBaseline: dbSetBaseline, clearBaseline: dbClearBaseline } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask, setBaseline: dbSetBaseline, clearBaseline: dbClearBaseline, updateCharter: dbUpdateCharter, goals, addGoal: dbAddGoal, updateGoal: dbUpdateGoal, deleteGoal: dbDeleteGoal } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -46,7 +51,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
           collapsed: collapsedBuckets.has(b.id),
         })),
       }
-    : { id: '', name: '', contingencyPercent: 10, includeWeekends: false, buckets: [] };
+    : { id: '', name: '', contingencyPercent: 10, includeWeekends: false, charterMarkdown: '', buckets: [] };
 
   const getAllTasks = useCallback(() => {
     return projectWithCollapsed.buckets.flatMap(b => flattenTasks(b.tasks));
@@ -97,6 +102,11 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         getTaskById,
         setBaseline: dbSetBaseline,
         clearBaseline: dbClearBaseline,
+        updateCharter: dbUpdateCharter,
+        goals,
+        addGoal: dbAddGoal,
+        updateGoal: dbUpdateGoal,
+        deleteGoal: dbDeleteGoal,
         loading,
         members,
       }}
