@@ -125,6 +125,16 @@ function TaskTimelineRow({
 
 export function TimelineView() {
   const { project } = useProject();
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
+
+  const toggleBucketCollapse = (bucketId: string) => {
+    setCollapsedBuckets(prev => {
+      const next = new Set(prev);
+      if (next.has(bucketId)) next.delete(bucketId);
+      else next.add(bucketId);
+      return next;
+    });
+  };
 
   const allTasks = useMemo(() =>
     project.buckets.flatMap(b => flattenTasks(b.tasks).map(t => ({ ...t, bucketName: b.name, bucketColor: b.color })))
@@ -191,11 +201,18 @@ export function TimelineView() {
           {project.buckets.map(bucket => (
             <div key={bucket.id}>
               {/* Bucket Header */}
-              <div className="flex items-center border-b bg-muted/30">
+              <div
+                className="flex items-center border-b bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
+                onClick={() => toggleBucketCollapse(bucket.id)}
+              >
                 <div
                   className="w-[260px] shrink-0 px-4 py-2.5 border-r flex items-center gap-2"
                   style={{ borderLeft: `3px solid ${bucket.color}` }}
                 >
+                  {collapsedBuckets.has(bucket.id)
+                    ? <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                    : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                  }
                   <span className="text-sm font-bold" style={{ color: bucket.color }}>
                     {bucket.name}
                   </span>
@@ -207,7 +224,7 @@ export function TimelineView() {
               </div>
 
               {/* Task rows (recursive) */}
-              {bucket.tasks.map(task => (
+              {!collapsedBuckets.has(bucket.id) && bucket.tasks.map(task => (
                 <TaskTimelineRow
                   key={task.id}
                   task={task}
