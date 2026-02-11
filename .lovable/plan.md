@@ -1,66 +1,58 @@
 
 
-## Circular Dependency Detection and CMD+K Task Search
+## Upgrade: Risk Mitigation Cost Tracking and Financial Summary
 
-### Overview
-Two improvements to project scheduling UX:
-1. **Circular dependency detection** -- When selecting a "Depends On" task in the TaskDialog, immediately check if it would create a loop (A depends on B depends on A). If so, show a destructive toast and revert the selection.
-2. **CMD+K / CTRL+K search** -- A global keyboard shortcut that opens a command palette to quickly search and jump to any task by name, opening its TaskDialog.
+### What Already Exists (No Changes Needed)
+- **Baseline dates** (`baseline_start_date`, `baseline_end_date`) -- already on tasks table and wired up
+- **Effort hours** (`effort_hours`) -- already on tasks table and editable in TaskDialog
+- **Weekend skipping** -- `scheduleTask` already uses `addWorkingDays`/`nextWorkingDay`/`workingDaysDiff`
+- **Circular dependency detection** -- already in both `TaskDialog.tsx` and `useProjectData.ts`
 
----
+### What Needs to Be Built
 
-### 1. Circular Dependency Detection (TaskDialog.tsx)
+#### 1. Database Migration: Add `realized_cost` to tasks
+- Add column `realized_cost` (numeric, default 0) to the `tasks` table
 
-**What changes:**
-- Add a `detectCircularDependency` helper function that walks the dependency chain from the selected predecessor. If it ever reaches back to the current task, a cycle exists.
-- Wrap the "Depends On" `onValueChange` handler to call this check before updating state. If circular, show an error toast and keep the previous value.
+#### 2. Type Updates (`src/types/project.ts`)
+- Add `realizedCost: number` to the `Task` interface
 
-**Logic:**
-```text
-function hasCircularDependency(taskId, proposedDependsOn, allTasks):
-    visited = { taskId }
-    current = proposedDependsOn
-    while current exists:
-        if current in visited -> return true (circular!)
-        visited.add(current)
-        current = allTasks.find(t => t.id === current).dependsOn
-    return false
-```
+#### 3. Data Layer Updates (`src/hooks/useProjectData.ts`)
+- Map `realized_cost` from DB rows to `realizedCost` on the Task object in `buildTaskTree`
+- Add `realized_cost` to the `updateTask` DB field mapping
 
-**File:** `src/components/TaskDialog.tsx`
-- Replace the `onValueChange` of the "Depends On" Select (around line 341) to run the circular check first, showing a destructive toast on failure.
+#### 4. Risk Registry: Realized Mitigation Cost Input (`src/components/RiskRegistry.tsx`)
+- Add a "Realized Mitigation Cost ($)" number input to each expanded risk task card
+- On change, call `updateTask(taskId, { realizedCost: value })` to persist
 
----
+#### 5. Financial Summary Enhancement (`src/components/TableView.tsx`)
+- Compute `totalRealizedRiskCost` = sum of `realizedCost` for all tasks where `flaggedAsRisk` is true
+- Compute `remainingContingency` = `contingencyAmount - totalRealizedRiskCost`
+- Add two new cards to the financial summary grid:
+  - **Total Realized Risk Cost** -- displays the sum, styled in amber/red
+  - **Remaining Contingency** -- displays the remaining amount, red if negative
+- Highlight the "Actual Cost" card in red if `actualCost + realizedRiskCost > estimatedCost` for any task (already partially done; extend to include realized cost)
 
-### 2. CMD+K Task Search (New Component + Index Integration)
+#### 6. TaskDialog Updates (`src/components/TaskDialog.tsx`)
+- Add `realizedCost` to formData initialization
+- Include `realizedCost` in the save/update payload
+- Add a "Realized Mitigation Cost ($)" input in the Costs section (only visible when `flaggedAsRisk` is true)
 
-**New file:** `src/components/TaskSearchCommand.tsx`
-- Uses the existing `cmdk`-based `CommandDialog`, `CommandInput`, `CommandList`, `CommandItem`, `CommandEmpty` components from `src/components/ui/command.tsx`.
-- Lists all tasks (from `useProject().getAllTasks()`) filtered by the search query.
-- Selecting a task opens its `TaskDialog` for editing.
-
-**Global keyboard listener:**
-- In `src/pages/Index.tsx`, add a `useEffect` that listens for `CMD+K` (Mac) / `CTRL+K` (Windows) and toggles the search dialog open.
-
-**Files changed:**
-- `src/components/TaskSearchCommand.tsx` (new) -- Command palette component
-- `src/pages/Index.tsx` -- Add keyboard listener and render the search component
-
----
+#### 7. Task Row: Red Highlight on Actual Column (`src/components/TaskRow.tsx`)
+- When rendering the "actual" cost cell, apply red text if `task.actualCost + task.realizedCost > task.estimatedCost`
 
 ### Technical Details
 
-**Circular detection in TaskDialog.tsx:**
-- The helper uses `getAllTasks()` already available in the component.
-- Walks the `dependsOn` chain with a visited set to detect cycles in O(n) time.
-- On detection: `toast({ title: 'Error: Circular Dependency', description: '...', variant: 'destructive' })` and the Select value stays unchanged.
+**Migration SQL:**
+```sql
+ALTER TABLE public.tasks ADD COLUMN realized_cost numeric NOT NULL DEFAULT 0;
+```
 
-**TaskSearchCommand.tsx:**
-- Accepts `open` / `onOpenChange` props and an `onSelectTask(task: Task)` callback.
-- Groups tasks or shows them flat with status/owner badges for quick identification.
-- The selected task opens a TaskDialog inline.
-
-**Index.tsx integration:**
-- `useEffect` with `keydown` listener for `(e.metaKey || e.ctrlKey) && e.key === 'k'` -- calls `e.preventDefault()` and toggles state.
-- Renders `<TaskSearchCommand>` at the page level so it works across all views.
+**Files to modify:**
+- New migration for `realized_cost` column
+- `src/types/project.ts` -- add `realizedCost` field
+- `src/hooks/useProjectData.ts` -- map and persist `realizedCost`
+- `src/components/TaskDialog.tsx` -- add input for realized cost (when flagged as risk)
+- `src/components/TaskRow.tsx` -- red highlight logic on actual cost cell
+- `src/components/RiskRegistry.tsx` -- add realized cost input per risk task
+- `src/components/TableView.tsx` -- add Total Realized Risk Cost and Remaining Contingency to financial summary
 
