@@ -149,7 +149,9 @@ export type Database = {
           action_type: Database["public"]["Enums"]["risk_action_type"]
           created_at: string
           description: string
+          due_date: string | null
           id: string
+          owner_id: string | null
           task_id: string
           updated_at: string
         }
@@ -157,7 +159,9 @@ export type Database = {
           action_type: Database["public"]["Enums"]["risk_action_type"]
           created_at?: string
           description?: string
+          due_date?: string | null
           id?: string
+          owner_id?: string | null
           task_id: string
           updated_at?: string
         }
@@ -165,7 +169,9 @@ export type Database = {
           action_type?: Database["public"]["Enums"]["risk_action_type"]
           created_at?: string
           description?: string
+          due_date?: string | null
           id?: string
+          owner_id?: string | null
           task_id?: string
           updated_at?: string
         }

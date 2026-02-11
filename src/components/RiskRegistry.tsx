@@ -3,18 +3,24 @@ import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
 import { TaskDialog } from './TaskDialog';
 import { Task } from '@/types/project';
-import { AlertTriangle, ShieldAlert, ChevronDown, Pencil, TrendingUp, TrendingDown, Minus, Plus, Trash2, Shield, LifeBuoy } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ChevronDown, Pencil, TrendingUp, TrendingDown, Minus, Plus, Trash2, Shield, LifeBuoy, CalendarIcon, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format, parseISO } from 'date-fns';
 
 interface RiskAction {
   id: string;
   task_id: string;
   action_type: 'mitigation' | 'contingency';
   description: string;
+  owner_id: string | null;
+  due_date: string | null;
 }
 
 const RISK_LABELS = {
@@ -38,8 +44,132 @@ function getRiskCellBg(impact: number, probability: number): string {
   return 'hsl(var(--status-done) / 0.15)';
 }
 
+interface ActionSectionProps {
+  icon: React.ReactNode;
+  title: string;
+  actions: RiskAction[];
+  taskId: string;
+  actionType: 'mitigation' | 'contingency';
+  placeholder: string;
+  members: { id: string; user_id: string; role: string; profile: any }[];
+  newActionText: Record<string, string>;
+  setNewActionText: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  onAdd: (taskId: string, actionType: 'mitigation' | 'contingency') => void;
+  onDelete: (actionId: string) => void;
+  onUpdateText: (actionId: string, description: string) => void;
+  onUpdateOwner: (actionId: string, ownerId: string | null) => void;
+  onUpdateDueDate: (actionId: string, dueDate: string | null) => void;
+}
+
+function ActionSection({ icon, title, actions, taskId, actionType, placeholder, members, newActionText, setNewActionText, onAdd, onDelete, onUpdateText, onUpdateOwner, onUpdateDueDate }: ActionSectionProps) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-2">
+        {icon}
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{title}</p>
+      </div>
+      {actions.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {actions.map(action => {
+            const ownerProfile = action.owner_id ? members.find(m => m.user_id === action.owner_id)?.profile : null;
+            const isOverdue = action.due_date && new Date(action.due_date) < new Date(new Date().toISOString().split('T')[0]);
+            return (
+              <div key={action.id} className="group rounded-lg border border-border/40 bg-muted/20 p-2.5 space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <span className="text-xs text-muted-foreground mt-0.5">•</span>
+                  <input
+                    className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground focus:bg-muted/30 rounded px-1 py-0.5 -ml-1"
+                    defaultValue={action.description}
+                    onBlur={e => {
+                      if (e.target.value !== action.description) onUpdateText(action.id, e.target.value);
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  />
+                  <button
+                    onClick={() => onDelete(action.id)}
+                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0 p-0.5"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 pl-4">
+                  {/* Owner select */}
+                  <Select
+                    value={action.owner_id || 'unassigned'}
+                    onValueChange={v => onUpdateOwner(action.id, v === 'unassigned' ? null : v)}
+                  >
+                    <SelectTrigger className="h-6 text-[11px] w-[140px] border-border/40 bg-background/50">
+                      <div className="flex items-center gap-1.5">
+                        <User className="w-3 h-3 text-muted-foreground shrink-0" />
+                        <SelectValue placeholder="Owner" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      <SelectItem value="unassigned" className="text-xs">Unassigned</SelectItem>
+                      {members.map(m => (
+                        <SelectItem key={m.user_id} value={m.user_id} className="text-xs">
+                          {m.profile?.display_name || 'Unknown'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Due date picker */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "h-6 text-[11px] w-[130px] justify-start border-border/40 bg-background/50",
+                          isOverdue && "text-destructive border-destructive/30"
+                        )}
+                      >
+                        <CalendarIcon className="w-3 h-3 mr-1.5 shrink-0" />
+                        {action.due_date ? format(parseISO(action.due_date), 'MMM dd, yyyy') : 'Due date'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={action.due_date ? parseISO(action.due_date) : undefined}
+                        onSelect={date => onUpdateDueDate(action.id, date ? format(date, 'yyyy-MM-dd') : null)}
+                        className="pointer-events-auto"
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+                  {ownerProfile && (
+                    <span className="text-[10px] text-muted-foreground">{ownerProfile.display_name}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder={placeholder}
+          className="h-7 text-xs flex-1"
+          value={newActionText[`${taskId}-${actionType}`] || ''}
+          onChange={e => setNewActionText(prev => ({ ...prev, [`${taskId}-${actionType}`]: e.target.value }))}
+          onKeyDown={e => { if (e.key === 'Enter') onAdd(taskId, actionType); }}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0 shrink-0"
+          onClick={() => onAdd(taskId, actionType)}
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function RiskRegistry() {
-  const { project, updateTask } = useProject();
+  const { project, updateTask, members } = useProject();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [previousCounts, setPreviousCounts] = useState<{ Critical: number; High: number; Medium: number; Low: number } | null>(null);
@@ -125,6 +255,16 @@ export function RiskRegistry() {
 
   const updateActionText = async (actionId: string, description: string) => {
     await supabase.from('risk_actions').update({ description }).eq('id', actionId);
+    fetchRiskActions();
+  };
+
+  const updateActionOwner = async (actionId: string, ownerId: string | null) => {
+    await supabase.from('risk_actions').update({ owner_id: ownerId }).eq('id', actionId);
+    fetchRiskActions();
+  };
+
+  const updateActionDueDate = async (actionId: string, dueDate: string | null) => {
+    await supabase.from('risk_actions').update({ due_date: dueDate }).eq('id', actionId);
     fetchRiskActions();
   };
 
@@ -407,108 +547,40 @@ export function RiskRegistry() {
                             )}
 
                             {/* Mitigation Strategies */}
-                            <div>
-                              <div className="flex items-center gap-1.5 mb-2">
-                                <Shield className="w-3.5 h-3.5 text-muted-foreground" />
-                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Mitigation Strategies</p>
-                              </div>
-                              {mitigations.length > 0 && (
-                                <div className="space-y-1.5 mb-2">
-                                  {mitigations.map(action => (
-                                    <div key={action.id} className="flex items-start gap-2 group">
-                                      <span className="text-xs text-muted-foreground mt-0.5">•</span>
-                                      <input
-                                        className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground focus:bg-muted/30 rounded px-1 py-0.5 -ml-1"
-                                        defaultValue={action.description}
-                                        onBlur={e => {
-                                          if (e.target.value !== action.description) {
-                                            updateActionText(action.id, e.target.value);
-                                          }
-                                        }}
-                                        onKeyDown={e => {
-                                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                                        }}
-                                      />
-                                      <button
-                                        onClick={() => deleteAction(action.id)}
-                                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0 p-0.5"
-                                      >
-                                        <Trash2 className="w-3 h-3" />
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  placeholder="Add mitigation strategy..."
-                                  className="h-7 text-xs flex-1"
-                                  value={newActionText[`${task.id}-mitigation`] || ''}
-                                  onChange={e => setNewActionText(prev => ({ ...prev, [`${task.id}-mitigation`]: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') addAction(task.id, 'mitigation'); }}
-                                />
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 w-7 p-0 shrink-0"
-                                  onClick={() => addAction(task.id, 'mitigation')}
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            </div>
+                            <ActionSection
+                              icon={<Shield className="w-3.5 h-3.5 text-muted-foreground" />}
+                              title="Mitigation Strategies"
+                              actions={mitigations}
+                              taskId={task.id}
+                              actionType="mitigation"
+                              placeholder="Add mitigation strategy..."
+                              members={members}
+                              newActionText={newActionText}
+                              setNewActionText={setNewActionText}
+                              onAdd={addAction}
+                              onDelete={deleteAction}
+                              onUpdateText={updateActionText}
+                              onUpdateOwner={updateActionOwner}
+                              onUpdateDueDate={updateActionDueDate}
+                            />
 
                             {/* Contingency Plans */}
-                            <div>
-                              <div className="flex items-center gap-1.5 mb-2">
-                                <LifeBuoy className="w-3.5 h-3.5 text-muted-foreground" />
-                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Contingency Plans</p>
-                              </div>
-                              {contingencies.length > 0 && (
-                                <div className="space-y-1.5 mb-2">
-                                  {contingencies.map(action => (
-                                    <div key={action.id} className="flex items-start gap-2 group">
-                                      <span className="text-xs text-muted-foreground mt-0.5">•</span>
-                                      <input
-                                        className="flex-1 text-xs bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground focus:bg-muted/30 rounded px-1 py-0.5 -ml-1"
-                                        defaultValue={action.description}
-                                        onBlur={e => {
-                                          if (e.target.value !== action.description) {
-                                            updateActionText(action.id, e.target.value);
-                                          }
-                                        }}
-                                        onKeyDown={e => {
-                                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                                        }}
-                                      />
-                                      <button
-                                        onClick={() => deleteAction(action.id)}
-                                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0 p-0.5"
-                                      >
-                                        <Trash2 className="w-3 h-3" />
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  placeholder="Add contingency plan..."
-                                  className="h-7 text-xs flex-1"
-                                  value={newActionText[`${task.id}-contingency`] || ''}
-                                  onChange={e => setNewActionText(prev => ({ ...prev, [`${task.id}-contingency`]: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') addAction(task.id, 'contingency'); }}
-                                />
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 w-7 p-0 shrink-0"
-                                  onClick={() => addAction(task.id, 'contingency')}
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            </div>
+                            <ActionSection
+                              icon={<LifeBuoy className="w-3.5 h-3.5 text-muted-foreground" />}
+                              title="Contingency Plans"
+                              actions={contingencies}
+                              taskId={task.id}
+                              actionType="contingency"
+                              placeholder="Add contingency plan..."
+                              members={members}
+                              newActionText={newActionText}
+                              setNewActionText={setNewActionText}
+                              onAdd={addAction}
+                              onDelete={deleteAction}
+                              onUpdateText={updateActionText}
+                              onUpdateOwner={updateActionOwner}
+                              onUpdateDueDate={updateActionDueDate}
+                            />
                           </div>
                         </motion.div>
                       )}
