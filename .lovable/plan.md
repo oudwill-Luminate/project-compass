@@ -1,100 +1,110 @@
 
 
-## Resource Leveling for the Workload View
+## Atomic Date Cascade via Database Function
 
-### Overview
-Add a "Level Resources" button to the Workload view that analyzes over-allocated days, identifies non-critical tasks that can be shifted (those with slack > 0), computes new suggested dates, and presents a Before vs. After confirmation modal before applying any changes.
+### Problem
+The current `cascadeDependents` function in `useProjectData.ts` (lines 464-489) performs recursive `supabase.from('tasks').update()` calls one at a time. If any call fails mid-cascade, the database ends up in an inconsistent state with some tasks rescheduled and others not.
 
----
-
-### 1. Leveling Algorithm (`src/lib/resourceLeveling.ts` -- new file)
-
-Create a pure utility function that:
-
-1. Takes all tasks and the critical path result as input
-2. Groups tasks by owner, then computes daily load per owner (same logic as WorkloadView already does)
-3. For each over-allocated day per owner:
-   - Finds tasks contributing to that day's load that are **non-critical** (slack > 0)
-   - Sorts candidates by descending slack (most flexible first)
-   - For each candidate, proposes shifting its start/end dates forward by 1+ days until the owner's load on the original day drops to 8h or below
-   - The shift is constrained by the task's available slack so it never pushes the project end date
-4. Returns a list of proposed changes: `{ taskId, taskTitle, ownerName, oldStart, oldEnd, newStart, newEnd }[]`
-
-Key rules:
-- Never move critical-path tasks (zero slack)
-- Never shift a task beyond its slack allowance
-- Preserve task duration (shift both start and end equally)
-- Process owners independently
+### Solution
+Move the entire cascade into a single PostgreSQL function called via RPC, ensuring atomicity.
 
 ---
 
-### 2. "Level Resources" Button (WorkloadView.tsx)
+### 1. Database Migration -- Create `cascade_task_dates` function
 
-- Add a button in the header area next to the title, styled with the `outline` variant
-- Icon: `Scale` from lucide-react
-- Disabled when `overAllocatedCount === 0` (no leveling needed)
-- On click: run the leveling algorithm, then open the confirmation modal
-- If the algorithm finds no movable tasks, show a `toast.info("All over-allocated tasks are on the critical path and cannot be moved.")`
+A new PostgreSQL function `cascade_task_dates(_task_id UUID, _new_start DATE, _new_end DATE, _include_weekends BOOLEAN)` that:
 
----
+1. Updates the target task's `start_date` and `end_date`
+2. Recursively finds all tasks where `depends_on` points to the updated task
+3. For each dependent, computes new dates based on `dependency_type` (FS, FF, SS, SF), preserving task duration and respecting buffer days/position
+4. Continues recursing through the full dependency chain
+5. Returns a count of tasks updated
+6. All within a single transaction (implicit in a PL/pgSQL function)
 
-### 3. Confirmation Modal (`src/components/LevelResourcesDialog.tsx` -- new file)
-
-A dialog using the existing `AlertDialog` component showing:
-
-- **Header**: "Level Resources -- Proposed Schedule Changes"
-- **Body**: A table with columns:
-  - Task Name
-  - Owner
-  - Before (old start -- old end)
-  - After (new start -- new end)
-  - Shift (e.g., "+2 days")
-- Each row uses subtle color coding: old dates in muted text, new dates in green
-- **Footer**:
-  - "Cancel" button -- closes the dialog, no changes
-  - "Apply Changes" button -- calls `updateTask` for each proposed change, then shows a success toast
+Key implementation details:
+- Uses a loop with a queue (array of task IDs to process) rather than recursive CTEs, to handle cascading of already-computed new dates
+- Includes weekend-skipping logic mirroring the frontend's `addWorkingDays` and `nextWorkingDay` helpers
+- Uses a visited set (array) to prevent infinite loops from circular dependencies
+- The function will be `SECURITY INVOKER` so RLS policies still apply
 
 ---
 
-### 4. Integration
+### 2. Frontend Changes -- `useProjectData.ts`
 
-**Files to modify:**
-- `src/components/WorkloadView.tsx` -- add the button, import the leveling function and dialog, compute critical path, manage dialog state
-- `src/context/ProjectContext.tsx` -- no changes needed (already exposes `updateTask` and `getAllTasks`)
+Replace the `cascadeDependents` async loop (lines 460-494) with a single RPC call:
 
-**Files to create:**
-- `src/lib/resourceLeveling.ts` -- the pure leveling algorithm
-- `src/components/LevelResourcesDialog.tsx` -- the Before vs. After confirmation modal
-
----
-
-### Technical Detail: Leveling Logic Pseudocode
-
-```text
-function computeLevelingSuggestions(allTasks, slackDays, criticalIds):
-  proposals = []
-  
-  group tasks by owner
-  for each owner:
-    compute dailyLoad map (date -> hours)
-    sort overloaded dates chronologically
-    
-    for each overloaded date:
-      excess = dailyLoad[date] - 8
-      candidates = tasks on this date WHERE NOT critical AND slack > 0
-      sort candidates by slack DESC
-      
-      for each candidate while excess > 0:
-        taskDuration = endDate - startDate
-        hoursPerDay = effortHours / durationDays
-        shiftDays = min(slack, ceil(excess / hoursPerDay))
-        
-        propose: shift candidate forward by shiftDays
-        reduce excess by hoursPerDay
-        update dailyLoad to reflect the move
-        
-  return proposals
+```typescript
+if (datesChanged) {
+  await supabase.rpc('cascade_task_dates', {
+    _task_id: taskId,
+    _new_start: updatedTask.startDate,
+    _new_end: updatedTask.endDate,
+    _include_weekends: project.includeWeekends,
+  });
+}
 ```
 
-This approach is greedy but effective -- it prioritizes moving the most flexible tasks first, preserving the critical path and project end date.
+This replaces approximately 30 lines of recursive async code with a single atomic call. The optimistic UI update and `fetchAll()` refetch remain unchanged.
+
+---
+
+### 3. Files to Change
+
+| File | Action |
+|------|--------|
+| `supabase/migrations/...cascade_task_dates.sql` | New migration with the PL/pgSQL function |
+| `src/hooks/useProjectData.ts` | Replace lines 460-494 with single `supabase.rpc()` call |
+
+---
+
+### 4. Technical Detail -- PL/pgSQL Function Pseudocode
+
+```text
+CREATE FUNCTION cascade_task_dates(_task_id, _new_start, _new_end, _include_weekends)
+RETURNS INTEGER AS $$
+DECLARE
+  queue UUID[] := ARRAY[_task_id];
+  visited UUID[] := ARRAY[]::UUID[];
+  processed INT := 0;
+  current_id UUID;
+  dep RECORD;
+  pred_start DATE; pred_end DATE;
+  pred_buffer INT; pred_buffer_pos TEXT;
+  dep_duration INT;
+  new_start DATE; new_end DATE;
+BEGIN
+  -- Update the root task first
+  UPDATE tasks SET start_date = _new_start, end_date = _new_end WHERE id = _task_id;
+
+  WHILE array_length(queue, 1) > 0 LOOP
+    current_id := queue[1];
+    queue := queue[2:];
+
+    IF current_id = ANY(visited) THEN CONTINUE; END IF;
+    visited := visited || current_id;
+
+    -- Get predecessor's current dates (already updated in this tx)
+    SELECT start_date, end_date, buffer_days, buffer_position
+      INTO pred_start, pred_end, pred_buffer, pred_buffer_pos
+      FROM tasks WHERE id = current_id;
+
+    FOR dep IN SELECT * FROM tasks WHERE depends_on = current_id LOOP
+      -- Compute duration (working days or calendar days)
+      dep_duration := count_working_days(dep.start_date, dep.end_date, _include_weekends);
+
+      -- Schedule based on dependency_type (FS/FF/SS/SF)
+      -- ... (mirrors frontend scheduleTask logic)
+
+      UPDATE tasks SET start_date = new_start, end_date = new_end WHERE id = dep.id;
+      processed := processed + 1;
+      queue := queue || dep.id;
+    END LOOP;
+  END LOOP;
+
+  RETURN processed;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+The function includes helper sub-functions for `next_working_day` and `add_working_days` to handle weekend skipping, matching the existing frontend logic exactly.
 
