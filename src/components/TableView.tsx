@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronRight, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
+import { flattenTasks } from '@/hooks/useProjectData';
 import { TaskRow } from './TaskRow';
 import { cn } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
@@ -44,10 +45,10 @@ export function TableView() {
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
 
   const totalEstimated = project.buckets.reduce(
-    (sum, b) => sum + b.tasks.reduce((s, t) => s + t.estimatedCost, 0), 0
+    (sum, b) => sum + flattenTasks(b.tasks).reduce((s, t) => s + t.estimatedCost, 0), 0
   );
   const totalActual = project.buckets.reduce(
-    (sum, b) => sum + b.tasks.reduce((s, t) => s + t.actualCost, 0), 0
+    (sum, b) => sum + flattenTasks(b.tasks).reduce((s, t) => s + t.actualCost, 0), 0
   );
   const contingencyAmount = totalEstimated * (project.contingencyPercent / 100);
 
@@ -87,9 +88,10 @@ export function TableView() {
         <DragDropContext onDragEnd={handleDragEnd}>
           <div className="space-y-3 mt-3">
             {project.buckets.map(bucket => {
-              const bucketEstimated = bucket.tasks.reduce((s, t) => s + t.estimatedCost, 0);
-              const bucketActual = bucket.tasks.reduce((s, t) => s + t.actualCost, 0);
-              const dates = bucket.tasks.flatMap(t => [parseISO(t.startDate), parseISO(t.endDate)]);
+              const allBucketTasks = flattenTasks(bucket.tasks);
+              const bucketEstimated = allBucketTasks.reduce((s, t) => s + t.estimatedCost, 0);
+              const bucketActual = allBucketTasks.reduce((s, t) => s + t.actualCost, 0);
+              const dates = allBucketTasks.flatMap(t => [parseISO(t.startDate), parseISO(t.endDate)]);
               const bucketStart = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
               const bucketEnd = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
 
@@ -126,7 +128,7 @@ export function TableView() {
                     )}
 
                     <span className="text-xs text-muted-foreground">
-                      {bucket.tasks.length} tasks
+                      {allBucketTasks.length} tasks
                     </span>
                     {bucketStart && bucketEnd && (
                       <span className="text-xs text-muted-foreground ml-auto mr-2">
@@ -183,6 +185,7 @@ export function TableView() {
                                     >
                                       <TaskRow
                                         task={task}
+                                        bucketId={bucket.id}
                                         bucketColor={bucket.color}
                                         dragHandleProps={dragProvided.dragHandleProps}
                                       />

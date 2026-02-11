@@ -23,6 +23,8 @@ export interface Task {
   flaggedAsRisk: boolean;
   riskImpact: number; // 1-5
   riskProbability: number; // 1-5
+  parentTaskId: string | null;
+  subTasks: Task[];
 }
 
 export interface Bucket {

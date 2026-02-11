@@ -36,9 +36,109 @@ interface TaskRow {
   risk_impact: number;
   risk_probability: number;
   position: number;
+  parent_task_id: string | null;
 }
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
+
+function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRow>): Task[] {
+  const taskMap = new Map<string, Task>();
+
+  // First pass: create all tasks
+  for (const t of taskRows) {
+    const ownerId = t.owner_id;
+    const ownerProfile = ownerId && profileMap[ownerId];
+    const idx = ownerId ? Object.keys(profileMap).indexOf(ownerId) : 0;
+    taskMap.set(t.id, {
+      id: t.id,
+      title: t.title,
+      status: t.status as Task['status'],
+      priority: t.priority as Task['priority'],
+      owner: ownerProfile
+        ? { id: ownerProfile.id, name: ownerProfile.display_name, color: COLORS[idx % COLORS.length] }
+        : { id: 'unknown', name: 'Unassigned', color: '#999' },
+      startDate: t.start_date,
+      endDate: t.end_date,
+      estimatedCost: Number(t.estimated_cost),
+      actualCost: Number(t.actual_cost),
+      dependsOn: t.depends_on,
+      dependencyType: (t.dependency_type || 'FS') as DependencyType,
+      flaggedAsRisk: t.flagged_as_risk,
+      riskImpact: t.risk_impact,
+      riskProbability: t.risk_probability,
+      parentTaskId: t.parent_task_id,
+      subTasks: [],
+    });
+  }
+
+  // Second pass: nest children under parents
+  const topLevel: Task[] = [];
+  for (const t of taskRows) {
+    const task = taskMap.get(t.id)!;
+    if (t.parent_task_id && taskMap.has(t.parent_task_id)) {
+      taskMap.get(t.parent_task_id)!.subTasks.push(task);
+    } else {
+      topLevel.push(task);
+    }
+  }
+
+  return topLevel;
+}
+
+/** Flatten a task tree into a flat list (for dependency dropdowns, etc.) */
+export function flattenTasks(tasks: Task[]): Task[] {
+  const result: Task[] = [];
+  for (const t of tasks) {
+    result.push(t);
+    if (t.subTasks.length > 0) {
+      result.push(...flattenTasks(t.subTasks));
+    }
+  }
+  return result;
+}
+
+/** Helper to recursively update a task in a tree */
+function updateTaskInTree(tasks: Task[], taskId: string, updates: Partial<Task>): Task[] {
+  return tasks.map(t => {
+    if (t.id === taskId) return { ...t, ...updates };
+    if (t.subTasks.length > 0) {
+      return { ...t, subTasks: updateTaskInTree(t.subTasks, taskId, updates) };
+    }
+    return t;
+  });
+}
+
+/** Helper to recursively remove a task from a tree */
+function removeTaskFromTree(tasks: Task[], taskId: string): Task[] {
+  return tasks
+    .filter(t => t.id !== taskId)
+    .map(t => t.subTasks.length > 0 ? { ...t, subTasks: removeTaskFromTree(t.subTasks, taskId) } : t);
+}
+
+/** Helper to recursively find a task in a tree */
+function findTaskInTree(tasks: Task[], taskId: string): Task | undefined {
+  for (const t of tasks) {
+    if (t.id === taskId) return t;
+    if (t.subTasks.length > 0) {
+      const found = findTaskInTree(t.subTasks, taskId);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+/** Add a sub-task to a parent task in the tree */
+function addSubTaskToTree(tasks: Task[], parentTaskId: string, newTask: Task): Task[] {
+  return tasks.map(t => {
+    if (t.id === parentTaskId) {
+      return { ...t, subTasks: [...t.subTasks, newTask] };
+    }
+    if (t.subTasks.length > 0) {
+      return { ...t, subTasks: addSubTaskToTree(t.subTasks, parentTaskId, newTask) };
+    }
+    return t;
+  });
+}
 
 export function useProjectData(projectId: string | undefined) {
   const { user } = useAuth();
@@ -59,11 +159,10 @@ export function useProjectData(projectId: string | undefined) {
   const fetchAll = useCallback(async () => {
     if (!projectId || !user) return;
 
-    // Fetch project, buckets, tasks, members, and profiles in parallel
-    const [projRes, bucketsRes, tasksRes, membersRes] = await Promise.all([
+    const [projRes, bucketsRes, , membersRes] = await Promise.all([
       supabase.from('projects').select('*').eq('id', projectId).single(),
       supabase.from('buckets').select('*').eq('project_id', projectId).order('position'),
-      supabase.from('tasks').select('*').eq('bucket_id', projectId), // will be filtered below
+      supabase.from('tasks').select('*').eq('bucket_id', projectId), // unused, filtered below
       supabase.from('project_members').select('*').eq('project_id', projectId),
     ]);
 
@@ -76,7 +175,6 @@ export function useProjectData(projectId: string | undefined) {
     const bucketRows = (bucketsRes.data || []) as BucketRow[];
     const bucketIds = bucketRows.map(b => b.id);
 
-    // Now fetch tasks for these buckets
     let taskRows: TaskRow[] = [];
     if (bucketIds.length > 0) {
       const { data } = await supabase
@@ -87,7 +185,6 @@ export function useProjectData(projectId: string | undefined) {
       taskRows = (data || []) as TaskRow[];
     }
 
-    // Fetch profiles for all referenced users
     const memberRows = (membersRes.data || []) as any[];
     const allUserIds = new Set<string>();
     memberRows.forEach((m: any) => allUserIds.add(m.user_id));
@@ -104,37 +201,13 @@ export function useProjectData(projectId: string | undefined) {
     }
     setProfiles(profileMap);
 
-    // Build project structure
+    // Build project structure with nested sub-tasks
     const buckets: Bucket[] = bucketRows.map(b => ({
       id: b.id,
       name: b.name,
       color: b.color,
       collapsed: false,
-      tasks: taskRows
-        .filter(t => t.bucket_id === b.id)
-        .map(t => {
-          const ownerId = t.owner_id;
-          const ownerProfile = ownerId && profileMap[ownerId];
-          const idx = ownerId ? Object.keys(profileMap).indexOf(ownerId) : 0;
-          return {
-            id: t.id,
-            title: t.title,
-            status: t.status as Task['status'],
-            priority: t.priority as Task['priority'],
-            owner: ownerProfile
-              ? { id: ownerProfile.id, name: ownerProfile.display_name, color: COLORS[idx % COLORS.length] }
-              : { id: 'unknown', name: 'Unassigned', color: '#999' },
-            startDate: t.start_date,
-            endDate: t.end_date,
-            estimatedCost: Number(t.estimated_cost),
-            actualCost: Number(t.actual_cost),
-            dependsOn: t.depends_on,
-            dependencyType: (t.dependency_type || 'FS') as DependencyType,
-            flaggedAsRisk: t.flagged_as_risk,
-            riskImpact: t.risk_impact,
-            riskProbability: t.risk_probability,
-          };
-        }),
+      tasks: buildTaskTree(taskRows.filter(t => t.bucket_id === b.id), profileMap),
     }));
 
     const proj: Project = {
@@ -158,7 +231,6 @@ export function useProjectData(projectId: string | undefined) {
     fetchAll();
   }, [fetchAll]);
 
-  // Realtime subscriptions
   useEffect(() => {
     if (!projectId) return;
 
@@ -175,19 +247,18 @@ export function useProjectData(projectId: string | undefined) {
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
     if (!project) return;
 
-    // Optimistic update
+    // Optimistic update (recursive)
     setProject(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         buckets: prev.buckets.map(b => ({
           ...b,
-          tasks: b.tasks.map(t => t.id === taskId ? { ...t, ...updates } : t),
+          tasks: updateTaskInTree(b.tasks, taskId, updates),
         })),
       };
     });
 
-    // Map frontend fields to DB columns
     const dbUpdates: Record<string, any> = {};
     if (updates.title !== undefined) dbUpdates.title = updates.title;
     if (updates.status !== undefined) dbUpdates.status = updates.status;
@@ -201,9 +272,9 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.flaggedAsRisk !== undefined) dbUpdates.flagged_as_risk = updates.flaggedAsRisk;
     if (updates.riskImpact !== undefined) dbUpdates.risk_impact = updates.riskImpact;
     if (updates.riskProbability !== undefined) dbUpdates.risk_probability = updates.riskProbability;
+    if (updates.parentTaskId !== undefined) dbUpdates.parent_task_id = updates.parentTaskId;
 
-    // Handle auto-scheduling for date changes
-    const allTasks = project.buckets.flatMap(b => b.tasks);
+    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
     const oldTask = allTasks.find(t => t.id === taskId);
 
     if (oldTask) {
@@ -251,7 +322,6 @@ export function useProjectData(projectId: string | undefined) {
     const color = COLORS[position % COLORS.length];
     const tempId = `temp-${Date.now()}`;
 
-    // Optimistic update
     setProject(prev => {
       if (!prev) return prev;
       return {
@@ -265,7 +335,6 @@ export function useProjectData(projectId: string | undefined) {
   }, [projectId, project]);
 
   const updateBucket = useCallback(async (bucketId: string, updates: { name?: string; color?: string }) => {
-    // Optimistic update
     setProject(prev => {
       if (!prev) return prev;
       return {
@@ -279,7 +348,6 @@ export function useProjectData(projectId: string | undefined) {
   }, []);
 
   const deleteBucket = useCallback(async (bucketId: string) => {
-    // Optimistic update
     setProject(prev => {
       if (!prev) return prev;
       return { ...prev, buckets: prev.buckets.filter(b => b.id !== bucketId) };
@@ -290,10 +358,8 @@ export function useProjectData(projectId: string | undefined) {
     if (error) console.error('deleteBucket error:', error);
   }, []);
 
-  const addTask = useCallback(async (bucketId: string, title: string) => {
+  const addTask = useCallback(async (bucketId: string, title: string, parentTaskId?: string) => {
     if (!user) return;
-    const bucket = project?.buckets.find(b => b.id === bucketId);
-    const position = bucket?.tasks.length ?? 0;
     const today = format(new Date(), 'yyyy-MM-dd');
     const endDate = format(addDays(new Date(), 7), 'yyyy-MM-dd');
     const tempId = `temp-${Date.now()}`;
@@ -313,11 +379,22 @@ export function useProjectData(projectId: string | undefined) {
       flaggedAsRisk: false,
       riskImpact: 1,
       riskProbability: 1,
+      parentTaskId: parentTaskId || null,
+      subTasks: [],
     };
 
     // Optimistic update
     setProject(prev => {
       if (!prev) return prev;
+      if (parentTaskId) {
+        return {
+          ...prev,
+          buckets: prev.buckets.map(b => ({
+            ...b,
+            tasks: addSubTaskToTree(b.tasks, parentTaskId, newTask),
+          })),
+        };
+      }
       return {
         ...prev,
         buckets: prev.buckets.map(b =>
@@ -326,6 +403,9 @@ export function useProjectData(projectId: string | undefined) {
       };
     });
 
+    const bucket = project?.buckets.find(b => b.id === bucketId);
+    const position = bucket ? flattenTasks(bucket.tasks).length : 0;
+
     await supabase.from('tasks').insert({
       bucket_id: bucketId,
       title,
@@ -333,11 +413,11 @@ export function useProjectData(projectId: string | undefined) {
       owner_id: user.id,
       start_date: today,
       end_date: endDate,
+      parent_task_id: parentTaskId || null,
     });
   }, [user, project, toOwner]);
 
   const moveTask = useCallback(async (taskId: string, newBucketId: string, newPosition: number) => {
-    // Optimistic update
     setProject(prev => {
       if (!prev) return prev;
       let movedTask: Task | undefined;
@@ -365,14 +445,14 @@ export function useProjectData(projectId: string | undefined) {
   }, []);
 
   const deleteTask = useCallback(async (taskId: string) => {
-    // Optimistic update
+    // Optimistic update (recursive)
     setProject(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         buckets: prev.buckets.map(b => ({
           ...b,
-          tasks: b.tasks.filter(t => t.id !== taskId),
+          tasks: removeTaskFromTree(b.tasks, taskId),
         })),
       };
     });
