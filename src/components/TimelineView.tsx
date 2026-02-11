@@ -211,9 +211,31 @@ export function TimelineView() {
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
-      <div className="p-6 pb-3">
-        <h1 className="text-2xl font-bold text-foreground">Timeline</h1>
-        <p className="text-sm text-muted-foreground mt-1">Visual project roadmap</p>
+      <div className="p-6 pb-3 flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Timeline</h1>
+          <p className="text-sm text-muted-foreground mt-1">Visual project roadmap</p>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-3 rounded-sm bg-primary" />
+            <span>Task</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div
+              className="w-5 h-3 rounded-sm opacity-50"
+              style={{
+                backgroundColor: 'hsl(var(--primary))',
+                backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(255,255,255,0.4) 2px, rgba(255,255,255,0.4) 4px)',
+              }}
+            />
+            <span>Buffer</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded-sm bg-destructive" />
+            <span>Today</span>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto mx-6 mb-6 border rounded-xl">
