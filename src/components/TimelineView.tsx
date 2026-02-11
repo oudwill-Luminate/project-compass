@@ -91,10 +91,14 @@ function TaskTimelineRow({
           ))}
           {/* Task Bar */}
           {(() => {
-            const isWorking = task.status === 'working' && !hasSubTasks;
-            const prog = task.progress || 0;
-            const barBg = isWorking && prog > 0
-              ? `linear-gradient(to right, ${statusColor} ${prog}%, ${statusColor}66 ${prog}%)`
+            const isLeafWorking = task.status === 'working' && !hasSubTasks;
+            const parentProgress = hasSubTasks
+              ? Math.round(task.subTasks.reduce((sum, t) => sum + (t.progress || 0), 0) / task.subTasks.length)
+              : 0;
+            const prog = hasSubTasks ? parentProgress : (task.progress || 0);
+            const showProgress = (isLeafWorking || (hasSubTasks && parentProgress > 0)) && prog > 0;
+            const barBg = showProgress
+              ? `linear-gradient(to right, ${statusColor} ${prog}%, ${statusColor}33 ${prog}%)`
               : statusColor;
             return (
               <div
@@ -104,7 +108,7 @@ function TaskTimelineRow({
                   width: pos.width,
                   background: barBg,
                 }}
-                title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${isWorking && prog > 0 ? ` (${prog}%)` : ''}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
+                title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${showProgress ? ` (${prog}%)` : ''}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
               >
                 <span className="absolute inset-0 flex items-center px-2 text-[11px] text-white font-medium truncate">
                   {task.title}
