@@ -9,6 +9,7 @@ import { RiskRegistry } from '@/components/RiskRegistry';
 import { WorkloadView } from '@/components/WorkloadView';
 import { ProjectSettings } from '@/components/ProjectSettings';
 import { ProjectOverview } from '@/components/ProjectOverview';
+import { StakeholdersView } from '@/components/StakeholdersView';
 import { TaskSearchCommand } from '@/components/TaskSearchCommand';
 import { Loader2 } from 'lucide-react';
 
@@ -37,6 +38,7 @@ function ProjectContent() {
         {activeView === 'table' && <TableView />}
         {activeView === 'timeline' && <TimelineView />}
         {activeView === 'workload' && <WorkloadView />}
+        {activeView === 'stakeholders' && <StakeholdersView />}
         {activeView === 'risk' && <RiskRegistry />}
         {activeView === 'settings' && <ProjectSettings />}
       </motion.div>
