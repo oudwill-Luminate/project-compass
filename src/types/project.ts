@@ -32,6 +32,7 @@ export interface Task {
   effortHours: number;
   baselineStartDate: string | null;
   baselineEndDate: string | null;
+  realizedCost: number;
   subTasks: Task[];
 }
 

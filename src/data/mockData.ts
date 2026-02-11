@@ -12,7 +12,7 @@ const owners: Owner[] = [
   { id: 'o5', name: 'Chris Park', color: '#E2445C' },
 ];
 
-const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTasks' | 'bufferDays' | 'bufferPosition' | 'responsible' | 'progress' | 'riskDescription' | 'baselineStartDate' | 'baselineEndDate' | 'effortHours'> & { bufferDays?: number; bufferPosition?: 'start' | 'end'; responsible?: string | null; progress?: number; riskDescription?: string; effortHours?: number }): import('@/types/project').Task => ({
+const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTasks' | 'bufferDays' | 'bufferPosition' | 'responsible' | 'progress' | 'riskDescription' | 'baselineStartDate' | 'baselineEndDate' | 'effortHours' | 'realizedCost'> & { bufferDays?: number; bufferPosition?: 'start' | 'end'; responsible?: string | null; progress?: number; riskDescription?: string; effortHours?: number; realizedCost?: number }): import('@/types/project').Task => ({
   ...props,
   parentTaskId: null,
   bufferDays: props.bufferDays ?? 0,
@@ -21,6 +21,7 @@ const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTask
   riskDescription: props.riskDescription ?? '',
   progress: props.progress ?? 0,
   effortHours: props.effortHours ?? 0,
+  realizedCost: props.realizedCost ?? 0,
   baselineStartDate: null,
   baselineEndDate: null,
   subTasks: [],

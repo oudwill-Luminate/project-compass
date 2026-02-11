@@ -546,6 +546,18 @@ export function RiskRegistry() {
                               </div>
                             )}
 
+                            {/* Realized Mitigation Cost */}
+                            <div>
+                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Realized Mitigation Cost ($)</p>
+                              <Input
+                                type="number"
+                                min={0}
+                                className="h-8 text-xs w-48"
+                                value={task.realizedCost || 0}
+                                onChange={e => updateTask(task.id, { realizedCost: Number(e.target.value) })}
+                              />
+                            </div>
+
                             {/* Mitigation Strategies */}
                             <ActionSection
                               icon={<Shield className="w-3.5 h-3.5 text-muted-foreground" />}

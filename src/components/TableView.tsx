@@ -96,6 +96,7 @@ export function TableView() {
     effortHours: 0,
     baselineStartDate: null,
     baselineEndDate: null,
+    realizedCost: 0,
     subTasks: [],
   };
 
@@ -106,6 +107,10 @@ export function TableView() {
     (sum, b) => sum + flattenTasks(b.tasks).reduce((s, t) => s + t.actualCost, 0), 0
   );
   const contingencyAmount = totalEstimated * (project.contingencyPercent / 100);
+  const totalRealizedRiskCost = project.buckets.reduce(
+    (sum, b) => sum + flattenTasks(b.tasks).filter(t => t.flaggedAsRisk).reduce((s, t) => s + (t.realizedCost || 0), 0), 0
+  );
+  const remainingContingency = contingencyAmount - totalRealizedRiskCost;
 
   const handleDragEnd = useCallback((result: DropResult) => {
     if (!result.destination) return;
@@ -492,7 +497,7 @@ export function TableView() {
                   </div>
                 );
               })()}
-              <div className="grid grid-cols-4 gap-6 mb-5">
+              <div className="grid grid-cols-3 gap-6 mb-5">
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Total Budget</p>
                   <p className="text-2xl font-bold text-foreground tabular-nums">
@@ -511,12 +516,26 @@ export function TableView() {
                     {remaining < 0 ? '-' : ''}${Math.abs(remaining).toLocaleString()}
                   </p>
                 </div>
+              </div>
+              <div className="grid grid-cols-3 gap-6 mb-5">
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">
                     With {project.contingencyPercent}% Contingency
                   </p>
                   <p className="text-2xl font-bold text-primary tabular-nums">
                     ${budgetWithContingency.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Realized Risk Cost</p>
+                  <p className={cn("text-2xl font-bold tabular-nums", totalRealizedRiskCost > 0 ? "text-[hsl(var(--priority-high))]" : "text-foreground")}>
+                    ${totalRealizedRiskCost.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Remaining Contingency</p>
+                  <p className={cn("text-2xl font-bold tabular-nums", remainingContingency < 0 ? "text-destructive" : "text-foreground")}>
+                    {remainingContingency < 0 ? '-' : ''}${Math.abs(remainingContingency).toLocaleString()}
                   </p>
                 </div>
               </div>
