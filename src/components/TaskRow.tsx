@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format, parseISO, addDays, differenceInDays } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
@@ -81,6 +82,22 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
   const [expanded, setExpanded] = useState(true);
   const [addingSubTask, setAddingSubTask] = useState(false);
   const [subTaskTitle, setSubTaskTitle] = useState('');
+  const [checklistCount, setChecklistCount] = useState<{ checked: number; total: number } | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from('checklist_items' as any)
+      .select('checked')
+      .eq('task_id', task.id)
+      .then(({ data }) => {
+        if (data && (data as any[]).length > 0) {
+          const items = data as any[];
+          setChecklistCount({ checked: items.filter((i: any) => i.checked).length, total: items.length });
+        } else {
+          setChecklistCount(null);
+        }
+      });
+  }, [task.id, editOpen]);
 
   const hasSubTasks = task.subTasks.length > 0;
   const isHighRisk = task.flaggedAsRisk && task.riskImpact >= 4;
@@ -293,6 +310,25 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
         <span key="slippage" className="text-right text-xs text-muted-foreground">—</span>
       );
     }
+  }
+
+  if (show('checklist')) {
+    cells.push(
+      checklistCount ? (
+        <span
+          key="checklist"
+          className={cn(
+            'inline-flex items-center gap-1 text-xs font-medium',
+            checklistCount.checked === checklistCount.total ? 'text-[hsl(var(--status-done))]' : 'text-muted-foreground'
+          )}
+        >
+          <CheckSquare className="w-3.5 h-3.5" />
+          {checklistCount.checked}/{checklistCount.total}
+        </span>
+      ) : (
+        <span key="checklist" className="text-xs text-muted-foreground">—</span>
+      )
+    );
   }
 
   if (show('actions')) {
