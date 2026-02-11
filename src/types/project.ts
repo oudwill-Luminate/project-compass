@@ -34,6 +34,8 @@ export interface Bucket {
   id: string;
   name: string;
   color: string;
+  description?: string;
+  ownerId?: string | null;
   collapsed?: boolean;
   tasks: Task[];
 }

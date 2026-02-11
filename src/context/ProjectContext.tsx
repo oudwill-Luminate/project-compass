@@ -12,7 +12,7 @@ interface ProjectContextType {
   toggleBucket: (bucketId: string) => void;
   updateContingency: (percent: number) => void;
   addBucket: (name: string) => void;
-  updateBucket: (bucketId: string, updates: { name?: string; color?: string }) => void;
+  updateBucket: (bucketId: string, updates: { name?: string; color?: string; description?: string; owner_id?: string | null }) => void;
   deleteBucket: (bucketId: string) => void;
   addTask: (bucketId: string, title: string, parentTaskId?: string) => void;
   createTaskFull: (bucketId: string, taskData: Omit<Task, 'id' | 'subTasks'>) => void;
