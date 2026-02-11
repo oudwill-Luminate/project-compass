@@ -1,58 +1,124 @@
 
 
-## Upgrade: Risk Mitigation Cost Tracking and Financial Summary
+## Methodology Gaps: Critical Path, Financial Precision, Error Handling, and Project Overview
 
-### What Already Exists (No Changes Needed)
-- **Baseline dates** (`baseline_start_date`, `baseline_end_date`) -- already on tasks table and wired up
-- **Effort hours** (`effort_hours`) -- already on tasks table and editable in TaskDialog
-- **Weekend skipping** -- `scheduleTask` already uses `addWorkingDays`/`nextWorkingDay`/`workingDaysDiff`
-- **Circular dependency detection** -- already in both `TaskDialog.tsx` and `useProjectData.ts`
+### 1. Critical Path Highlighting (TimelineView.tsx)
 
-### What Needs to Be Built
+**What it does:** Calculates the critical path (longest chain of dependent tasks with zero total float) and highlights those task bars with a bright orange border in the timeline.
 
-#### 1. Database Migration: Add `realized_cost` to tasks
-- Add column `realized_cost` (numeric, default 0) to the `tasks` table
+**Implementation:**
+- Add a `useMemo` in `TimelineView` that computes the critical path using a forward/backward pass algorithm:
+  - **Forward pass:** For each task, compute Earliest Start (ES) and Earliest Finish (EF) by walking dependency chains
+  - **Backward pass:** From the project end date, compute Latest Start (LS) and Latest Finish (LF)
+  - **Total Float** = LS - ES. Tasks with float === 0 are on the critical path
+- Pass a `criticalTaskIds: Set<string>` prop down to `TaskTimelineRow`
+- When a task is on the critical path, apply `ring-2 ring-orange-500` to the task bar
+- Add an orange legend item ("Critical Path") to the legend bar
 
-#### 2. Type Updates (`src/types/project.ts`)
-- Add `realizedCost: number` to the `Task` interface
+**Files:** `src/components/TimelineView.tsx`
 
-#### 3. Data Layer Updates (`src/hooks/useProjectData.ts`)
-- Map `realized_cost` from DB rows to `realizedCost` on the Task object in `buildTaskTree`
-- Add `realized_cost` to the `updateTask` DB field mapping
+---
 
-#### 4. Risk Registry: Realized Mitigation Cost Input (`src/components/RiskRegistry.tsx`)
-- Add a "Realized Mitigation Cost ($)" number input to each expanded risk task card
-- On change, call `updateTask(taskId, { realizedCost: value })` to persist
+### 2. Financial Precision: Hourly Rate Auto-Calculation
 
-#### 5. Financial Summary Enhancement (`src/components/TableView.tsx`)
-- Compute `totalRealizedRiskCost` = sum of `realizedCost` for all tasks where `flaggedAsRisk` is true
-- Compute `remainingContingency` = `contingencyAmount - totalRealizedRiskCost`
-- Add two new cards to the financial summary grid:
-  - **Total Realized Risk Cost** -- displays the sum, styled in amber/red
-  - **Remaining Contingency** -- displays the remaining amount, red if negative
-- Highlight the "Actual Cost" card in red if `actualCost + realizedRiskCost > estimatedCost` for any task (already partially done; extend to include realized cost)
+**Database migration:**
+- Add `hourly_rate` (numeric, default 0) column to the `profiles` table
 
-#### 6. TaskDialog Updates (`src/components/TaskDialog.tsx`)
-- Add `realizedCost` to formData initialization
-- Include `realizedCost` in the save/update payload
-- Add a "Realized Mitigation Cost ($)" input in the Costs section (only visible when `flaggedAsRisk` is true)
+**Data layer changes (`src/hooks/useProjectData.ts`):**
+- Extend `ProfileRow` interface to include `hourly_rate: number`
+- In `buildTaskTree`, when constructing each Task: if `estimated_cost` is 0 and `effort_hours > 0` and the owner has an `hourly_rate > 0`, auto-calculate `estimatedCost = effort_hours * hourly_rate`
+- Pass the `profileMap` into `buildTaskTree` (already done) so it can look up rates
 
-#### 7. Task Row: Red Highlight on Actual Column (`src/components/TaskRow.tsx`)
-- When rendering the "actual" cost cell, apply red text if `task.actualCost + task.realizedCost > task.estimatedCost`
+**Profile editing:**
+- In `ProjectSettings.tsx` (or a profile settings area), add an "Hourly Rate ($)" input field so users can set their rate
+- Persist via `supabase.from('profiles').update({ hourly_rate })` 
 
-### Technical Details
+**Files:** Migration SQL, `src/hooks/useProjectData.ts`, `src/components/ProjectSettings.tsx`
 
-**Migration SQL:**
+---
+
+### 3. Refined Circular Dependency Error Messages
+
+**Current state:** Both `TaskDialog.tsx` and `useProjectData.ts` detect circular dependencies but show generic messages like "This dependency would create a loop."
+
+**Improvement:**
+- In `TaskDialog.tsx` (lines 344-358): Walk the chain and collect task titles for each node in the cycle, then display the loop path in the toast, e.g. *"Circular dependency: Task A -> Task B -> Task C -> Task A"*
+- In `useProjectData.ts` (line 398): Same improvement -- collect the chain of task titles and pass them to `toast.error()` with the specific loop path
+
+**Files:** `src/components/TaskDialog.tsx`, `src/hooks/useProjectData.ts`
+
+---
+
+### 4. Project Overview Tab (Charter + Goals)
+
+**Database migration:**
+- Create a `project_goals` table:
+  - `id` (uuid, PK, default gen_random_uuid())
+  - `project_id` (uuid, FK to projects, NOT NULL)
+  - `title` (text, NOT NULL)
+  - `progress` (integer, default 0, 0-100)
+  - `position` (integer, default 0)
+  - `created_at` (timestamptz, default now())
+  - `updated_at` (timestamptz, default now())
+- Add `charter_markdown` (text, default '') column to `projects` table
+- RLS policies on `project_goals`: members can view, editors can insert/update/delete
+- Enable realtime on `project_goals`
+
+**New component:** `src/components/ProjectOverview.tsx`
+- Split into two sections:
+  - **Project Charter:** A textarea (or simple markdown editor) that saves `charter_markdown` on the `projects` row. Rendered as formatted markdown below the editor.
+  - **Project Goals:** 3-5 goal cards, each with a title, editable progress slider (0-100%), and a progress bar. Add/remove buttons (capped at 5 goals).
+
+**Integration:**
+- Add `'overview'` to the `ViewType` union in `ProjectContext.tsx`
+- Add a nav item in `Sidebar.tsx` (e.g., `FileText` icon, "Overview", positioned first)
+- Render `<ProjectOverview />` in `Index.tsx` when `activeView === 'overview'`
+- Add data hooks in `useProjectData.ts`: `updateCharter(markdown)`, `addGoal()`, `updateGoal()`, `deleteGoal()`, and expose via context
+
+**Files:** Migration SQL, new `src/components/ProjectOverview.tsx`, `src/context/ProjectContext.tsx`, `src/components/Sidebar.tsx`, `src/pages/Index.tsx`, `src/hooks/useProjectData.ts`, `src/types/project.ts`
+
+---
+
+### Technical Summary
+
+**Database migrations (single migration file):**
 ```sql
-ALTER TABLE public.tasks ADD COLUMN realized_cost numeric NOT NULL DEFAULT 0;
+ALTER TABLE public.profiles ADD COLUMN hourly_rate numeric NOT NULL DEFAULT 0;
+ALTER TABLE public.projects ADD COLUMN charter_markdown text NOT NULL DEFAULT '';
+
+CREATE TABLE public.project_goals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  title text NOT NULL DEFAULT '',
+  progress integer NOT NULL DEFAULT 0,
+  position integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.project_goals ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Members can view goals" ON public.project_goals
+  FOR SELECT USING (is_project_member(auth.uid(), project_id));
+CREATE POLICY "Editors can insert goals" ON public.project_goals
+  FOR INSERT WITH CHECK (is_project_editor(auth.uid(), project_id));
+CREATE POLICY "Editors can update goals" ON public.project_goals
+  FOR UPDATE USING (is_project_editor(auth.uid(), project_id));
+CREATE POLICY "Editors can delete goals" ON public.project_goals
+  FOR DELETE USING (is_project_editor(auth.uid(), project_id));
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.project_goals;
 ```
 
-**Files to modify:**
-- New migration for `realized_cost` column
-- `src/types/project.ts` -- add `realizedCost` field
-- `src/hooks/useProjectData.ts` -- map and persist `realizedCost`
-- `src/components/TaskDialog.tsx` -- add input for realized cost (when flagged as risk)
-- `src/components/TaskRow.tsx` -- red highlight logic on actual cost cell
-- `src/components/RiskRegistry.tsx` -- add realized cost input per risk task
-- `src/components/TableView.tsx` -- add Total Realized Risk Cost and Remaining Contingency to financial summary
+**Files to create:**
+- `src/components/ProjectOverview.tsx`
 
+**Files to modify:**
+- `src/components/TimelineView.tsx` -- critical path calculation + orange highlight
+- `src/hooks/useProjectData.ts` -- hourly rate auto-calc, charter/goals CRUD, improved cycle error
+- `src/components/TaskDialog.tsx` -- improved circular dependency error message
+- `src/types/project.ts` -- add `ProjectGoal` interface, update `Project` interface
+- `src/context/ProjectContext.tsx` -- add overview view type, charter/goals methods
+- `src/components/Sidebar.tsx` -- add Overview nav item
+- `src/pages/Index.tsx` -- render ProjectOverview
+- `src/components/ProjectSettings.tsx` -- hourly rate input for members
