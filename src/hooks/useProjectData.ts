@@ -459,6 +459,32 @@ export function useProjectData(projectId: string | undefined) {
     if (error) console.error('deleteBucket error:', error);
   }, []);
 
+  const moveBucket = useCallback(async (bucketId: string, newPosition: number) => {
+    setProject(prev => {
+      if (!prev) return prev;
+      const oldIndex = prev.buckets.findIndex(b => b.id === bucketId);
+      if (oldIndex === -1 || oldIndex === newPosition) return prev;
+      const newBuckets = [...prev.buckets];
+      const [moved] = newBuckets.splice(oldIndex, 1);
+      newBuckets.splice(newPosition, 0, moved);
+      return { ...prev, buckets: newBuckets };
+    });
+
+    // Update all positions in DB
+    if (!project) return;
+    const oldIndex = project.buckets.findIndex(b => b.id === bucketId);
+    if (oldIndex === -1 || oldIndex === newPosition) return;
+    const newBuckets = [...project.buckets];
+    const [moved] = newBuckets.splice(oldIndex, 1);
+    newBuckets.splice(newPosition, 0, moved);
+
+    await Promise.all(
+      newBuckets.map((b, i) =>
+        supabase.from('buckets').update({ position: i }).eq('id', b.id)
+      )
+    );
+  }, [project]);
+
   const addTask = useCallback(async (bucketId: string, title: string, parentTaskId?: string) => {
     if (!user) return;
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -596,5 +622,5 @@ export function useProjectData(projectId: string | undefined) {
     if (error) console.error('deleteTask error:', error);
   }, []);
 
-  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, addTask, createTaskFull, moveTask, deleteTask, refetch: fetchAll, profiles, toOwner };
+  return { project, members, loading, updateTask, updateContingency, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, refetch: fetchAll, profiles, toOwner };
 }
