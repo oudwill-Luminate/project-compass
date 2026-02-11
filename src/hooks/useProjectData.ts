@@ -761,5 +761,38 @@ export function useProjectData(projectId: string | undefined) {
     toast.success('Baseline set for all tasks');
   }, [project]);
 
-  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, refetch: fetchAll, profiles, toOwner };
+  const clearBaseline = useCallback(async () => {
+    if (!project) return;
+    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        buckets: prev.buckets.map(b => ({
+          ...b,
+          tasks: (function clearInTree(tasks: Task[]): Task[] {
+            return tasks.map(t => ({
+              ...t,
+              baselineStartDate: null,
+              baselineEndDate: null,
+              subTasks: clearInTree(t.subTasks),
+            }));
+          })(b.tasks),
+        })),
+      };
+    });
+
+    await Promise.all(
+      allTasks.map(t =>
+        supabase.from('tasks').update({
+          baseline_start_date: null,
+          baseline_end_date: null,
+        }).eq('id', t.id)
+      )
+    );
+    toast.success('Baseline cleared');
+  }, [project]);
+
+  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, profiles, toOwner };
 }
