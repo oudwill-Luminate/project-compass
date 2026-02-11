@@ -1,110 +1,95 @@
 
 
-## Atomic Date Cascade via Database Function
+## Enhanced Project Overview Tab
 
-### Problem
-The current `cascadeDependents` function in `useProjectData.ts` (lines 464-489) performs recursive `supabase.from('tasks').update()` calls one at a time. If any call fails mid-cascade, the database ends up in an inconsistent state with some tasks rescheduled and others not.
-
-### Solution
-Move the entire cascade into a single PostgreSQL function called via RPC, ensuring atomicity.
+### Overview
+Upgrade the existing Project Overview page with a Markdown editor (write + preview toggle) for the Project Charter, and add a "Project Health" traffic-light widget showing Schedule, Budget, and Risk status derived from live project data.
 
 ---
 
-### 1. Database Migration -- Create `cascade_task_dates` function
+### 1. Markdown Editor with Preview (no new dependencies)
 
-A new PostgreSQL function `cascade_task_dates(_task_id UUID, _new_start DATE, _new_end DATE, _include_weekends BOOLEAN)` that:
+Rather than adding a heavy rich-text library like Tiptap, use a lightweight **write/preview toggle** approach that works with the existing Markdown stored in `charter_markdown`:
 
-1. Updates the target task's `start_date` and `end_date`
-2. Recursively finds all tasks where `depends_on` points to the updated task
-3. For each dependent, computes new dates based on `dependency_type` (FS, FF, SS, SF), preserving task duration and respecting buffer days/position
-4. Continues recursing through the full dependency chain
-5. Returns a count of tasks updated
-6. All within a single transaction (implicit in a PL/pgSQL function)
+- **Write mode**: Keep the current `Textarea` (mono font) for editing raw Markdown
+- **Preview mode**: Render the Markdown as formatted HTML using a small custom parser (handles headings, bold, italic, lists, line breaks) -- no external library needed
+- A `Tabs` component (already available via Radix) switches between "Write" and "Preview"
 
-Key implementation details:
-- Uses a loop with a queue (array of task IDs to process) rather than recursive CTEs, to handle cascading of already-computed new dates
-- Includes weekend-skipping logic mirroring the frontend's `addWorkingDays` and `nextWorkingDay` helpers
-- Uses a visited set (array) to prevent infinite loops from circular dependencies
-- The function will be `SECURITY INVOKER` so RLS policies still apply
+This avoids adding a dependency while giving a much better authoring experience than the current raw textarea.
 
 ---
 
-### 2. Frontend Changes -- `useProjectData.ts`
+### 2. Project Health Widget
 
-Replace the `cascadeDependents` async loop (lines 460-494) with a single RPC call:
+A card with three traffic-light indicators for **Schedule**, **Budget**, and **Risk**, each showing a colored dot (green/yellow/red) with a short label.
 
-```typescript
-if (datesChanged) {
-  await supabase.rpc('cascade_task_dates', {
-    _task_id: taskId,
-    _new_start: updatedTask.startDate,
-    _new_end: updatedTask.endDate,
-    _include_weekends: project.includeWeekends,
-  });
-}
+**Schedule Health** (derived from task data):
+- **Green**: >= 80% of tasks are on-time (end date on or before baseline, or no baseline set and status is done/working)
+- **Yellow**: 50-79% on-time
+- **Red**: < 50% on-time, or any critical-path task is "stuck"
+
+**Budget Health** (derived from cost data):
+- **Green**: Total actual cost <= 90% of total estimated cost
+- **Yellow**: 90-100% of estimated
+- **Red**: Over budget (actual > estimated)
+
+**Risk Health** (derived from risk-flagged tasks):
+- **Green**: No high-impact risks (impact * probability < 12)
+- **Yellow**: Some moderate risks (any task with score 9-15)
+- **Red**: Any task with risk score >= 16 (impact * probability), or more than 3 flagged risks
+
+---
+
+### 3. Layout Restructure
+
+The page will be reorganized into sections:
+
+```text
++------------------------------------------+
+|  Project Overview header                 |
++------------------------------------------+
+|  [ Project Health Widget ]               |
+|  Schedule: (G)  Budget: (G)  Risk: (Y)   |
++------------------------------------------+
+|  Project Charter                         |
+|  [Write] [Preview]                       |
+|  +------------------------------------+  |
+|  |  Markdown editor / rendered view   |  |
+|  +------------------------------------+  |
+|  [Save Charter]                          |
++------------------------------------------+
+|  Project Goals (unchanged)               |
++------------------------------------------+
 ```
 
-This replaces approximately 30 lines of recursive async code with a single atomic call. The optimistic UI update and `fetchAll()` refetch remain unchanged.
-
 ---
 
-### 3. Files to Change
+### 4. Files to Change
 
 | File | Action |
 |------|--------|
-| `supabase/migrations/...cascade_task_dates.sql` | New migration with the PL/pgSQL function |
-| `src/hooks/useProjectData.ts` | Replace lines 460-494 with single `supabase.rpc()` call |
+| `src/components/ProjectOverview.tsx` | Major rewrite: add health widget, add Markdown preview tabs |
+| `src/lib/projectHealth.ts` | New file: pure utility functions to compute schedule/budget/risk health status |
+
+No new dependencies required -- uses existing `Tabs` component from Radix and the `computeCriticalPath` utility.
 
 ---
 
-### 4. Technical Detail -- PL/pgSQL Function Pseudocode
+### 5. Technical Details
+
+**Health computation (`src/lib/projectHealth.ts`)**:
 
 ```text
-CREATE FUNCTION cascade_task_dates(_task_id, _new_start, _new_end, _include_weekends)
-RETURNS INTEGER AS $$
-DECLARE
-  queue UUID[] := ARRAY[_task_id];
-  visited UUID[] := ARRAY[]::UUID[];
-  processed INT := 0;
-  current_id UUID;
-  dep RECORD;
-  pred_start DATE; pred_end DATE;
-  pred_buffer INT; pred_buffer_pos TEXT;
-  dep_duration INT;
-  new_start DATE; new_end DATE;
-BEGIN
-  -- Update the root task first
-  UPDATE tasks SET start_date = _new_start, end_date = _new_end WHERE id = _task_id;
+type HealthStatus = 'green' | 'yellow' | 'red';
 
-  WHILE array_length(queue, 1) > 0 LOOP
-    current_id := queue[1];
-    queue := queue[2:];
-
-    IF current_id = ANY(visited) THEN CONTINUE; END IF;
-    visited := visited || current_id;
-
-    -- Get predecessor's current dates (already updated in this tx)
-    SELECT start_date, end_date, buffer_days, buffer_position
-      INTO pred_start, pred_end, pred_buffer, pred_buffer_pos
-      FROM tasks WHERE id = current_id;
-
-    FOR dep IN SELECT * FROM tasks WHERE depends_on = current_id LOOP
-      -- Compute duration (working days or calendar days)
-      dep_duration := count_working_days(dep.start_date, dep.end_date, _include_weekends);
-
-      -- Schedule based on dependency_type (FS/FF/SS/SF)
-      -- ... (mirrors frontend scheduleTask logic)
-
-      UPDATE tasks SET start_date = new_start, end_date = new_end WHERE id = dep.id;
-      processed := processed + 1;
-      queue := queue || dep.id;
-    END LOOP;
-  END LOOP;
-
-  RETURN processed;
-END;
-$$ LANGUAGE plpgsql;
+function computeScheduleHealth(tasks, criticalTaskIds) -> HealthStatus
+function computeBudgetHealth(tasks, contingencyPercent) -> HealthStatus  
+function computeRiskHealth(tasks) -> HealthStatus
 ```
 
-The function includes helper sub-functions for `next_working_day` and `add_working_days` to handle weekend skipping, matching the existing frontend logic exactly.
+Each function is pure and takes the flattened task list as input, returning a simple status string.
+
+**Markdown preview**: A simple function that converts basic Markdown syntax (headings, bold, italic, lists, paragraphs) into React elements. This covers the typical charter content without needing a full Markdown library.
+
+**Traffic light rendering**: Each indicator is a flex row with a colored circle (`w-3 h-3 rounded-full`) and label text. Colors map to Tailwind classes: `bg-green-500`, `bg-yellow-500`, `bg-red-500`.
 
