@@ -1,47 +1,79 @@
 
 
-## Slack Visualization Enhancements
+## Project Activity Audit Trail
 
-### What's Already Done
-- The backward-pass calculation already exists in `src/lib/criticalPath.ts` and produces a `slackDays` map
-- The "Slack" column already exists in `tableColumns.ts` and renders in `TaskRow.tsx`
-- `TableView.tsx` already computes and passes `slackDays` to each `TaskRow`
+### Overview
+Create an `activity_log` table to automatically track changes to task `end_date`, `estimated_cost`, and `status`. Add an "Activity" view accessible from the sidebar that displays a chronological feed of all project changes.
 
-### What Needs to Change
+### 1. Database: Create `activity_log` table
 
-#### 1. Centralize slack computation in `useProjectData.ts`
-Move the `computeCriticalPath` call out of individual views and into the project data hook so all views share the same computed slack data. This avoids redundant recalculation across TableView and TimelineView.
+New migration to create the table:
 
-- Add a `useMemo` in `useProjectData` that calls `computeCriticalPath` on all flattened tasks
-- Expose `slackDays` and `criticalTaskIds` from the hook's return value
-- Update `TableView.tsx` and `TimelineView.tsx` to consume these from the project context instead of computing locally
+```sql
+CREATE TABLE public.activity_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL,
+  task_id uuid,
+  user_id uuid NOT NULL,
+  description text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
-#### 2. Expose slack data via `ProjectContext`
-Add `slackDays` and `criticalTaskIds` to the context value so any component can access them.
+ALTER TABLE public.activity_log ENABLE ROW LEVEL SECURITY;
 
-#### 3. Add dotted slack line in `TimelineView.tsx`
-For each leaf task with positive slack (slack > 0), render a thin dotted/dashed line extending from the end of the task bar to the right, spanning the number of slack days. This shows the "safety window" -- how far the task could slip without affecting the project end date.
+CREATE POLICY "Members can view activity logs"
+  ON public.activity_log FOR SELECT
+  USING (is_project_member(auth.uid(), project_id));
 
-- Pass `slackDays` map into `TaskTimelineRow`
-- After the task bar, render a new `div` with a dashed border style
-- Width calculated as `(slackDays / totalDays) * 100%`
-- Positioned starting at the right edge of the task bar
-- Styled as a thin dashed line in a muted color (e.g., `border-dashed border-muted-foreground/40`)
-- Add a tooltip showing "Slack: X days"
-- Only rendered for leaf tasks (no sub-tasks)
+CREATE POLICY "Editors can insert activity logs"
+  ON public.activity_log FOR INSERT
+  WITH CHECK (is_project_editor(auth.uid(), project_id));
 
-#### 4. Update Timeline legend
-Add a "Slack" entry to the legend showing the dotted line style.
+CREATE INDEX idx_activity_log_project ON public.activity_log(project_id, created_at DESC);
+```
+
+No delete/update policies needed -- audit logs should be append-only.
+
+### 2. Frontend: Log changes in `useProjectData.ts`
+
+In the `updateTask` function, after the DB update succeeds, compare old vs new values for the three tracked fields and insert activity log entries:
+
+- **end_date**: "moved Deadline from {old} to {new}" on task "{title}"
+- **estimated_cost**: "changed Estimated Cost from ${old} to ${new}" on task "{title}"  
+- **status**: "changed Status from '{old}' to '{new}'" on task "{title}"
+
+The description will include the user's display name (from AuthContext profile) for readability, e.g., "Sarah moved Deadline from Oct 1 to Oct 5".
+
+### 3. Sidebar: Add "Activity" nav item
+
+- Add `'activity'` to the `ViewType` union in `ProjectContext.tsx`
+- Add a new nav item in `Sidebar.tsx` using the `Activity` (or `Clock`) icon from lucide-react
+- Position it after "Risk Registry" and before "Settings"
+
+### 4. New Component: `ProjectActivity.tsx`
+
+A scrollable feed component that:
+- Fetches from `activity_log` where `project_id` matches, ordered by `created_at DESC`
+- Displays each entry as a card/row with: user avatar (from profiles join), timestamp (relative, e.g. "2 hours ago"), and description text
+- Loads the most recent 50 entries initially with a "Load more" button
+- Subscribes to realtime updates on the `activity_log` table for live feed
+
+### 5. Wire up in `Index.tsx`
+
+Add the `{activeView === 'activity' && <ProjectActivity />}` rendering branch.
 
 ---
 
 ### Technical Details
 
 **Files to modify:**
-- `src/hooks/useProjectData.ts` -- add `computeCriticalPath` call, return `slackDays` and `criticalTaskIds`
-- `src/context/ProjectContext.tsx` -- expose `slackDays` and `criticalTaskIds` in context
-- `src/components/TimelineView.tsx` -- consume from context, pass `slackDays` to row, render dotted slack line, update legend
-- `src/components/TableView.tsx` -- remove local `computeCriticalPath` call, use context instead
+- New migration SQL (activity_log table + RLS + index)
+- `src/hooks/useProjectData.ts` -- add activity logging in `updateTask`
+- `src/context/ProjectContext.tsx` -- add `'activity'` to `ViewType`
+- `src/components/Sidebar.tsx` -- add Activity nav item
+- `src/components/ProjectActivity.tsx` -- new component
+- `src/pages/Index.tsx` -- render ProjectActivity for activity view
 
-**No database changes required.**
+**Realtime:** Enable realtime on `activity_log` table so the feed updates live when teammates make changes.
 
+**No breaking changes** to existing functionality -- this is purely additive.
