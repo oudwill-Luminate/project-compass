@@ -1,5 +1,6 @@
-import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder } from 'lucide-react';
+import { LayoutGrid, GanttChart, AlertTriangle, Settings, Folder, ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
 
@@ -11,9 +12,17 @@ const navItems = [
 
 export function Sidebar() {
   const { project, activeView, setActiveView } = useProject();
+  const navigate = useNavigate();
 
   return (
     <aside className="w-[260px] min-w-[260px] bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border h-screen sticky top-0">
+      <button
+        onClick={() => navigate('/')}
+        className="flex items-center gap-2 px-5 pt-4 pb-2 text-[11px] font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        <span>All Projects</span>
+      </button>
       <div className="p-5 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center shadow-md">
