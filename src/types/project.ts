@@ -23,6 +23,7 @@ export interface Task {
   flaggedAsRisk: boolean;
   riskImpact: number; // 1-5
   riskProbability: number; // 1-5
+  riskDescription: string;
   parentTaskId: string | null;
   bufferDays: number;
   bufferPosition: 'start' | 'end';

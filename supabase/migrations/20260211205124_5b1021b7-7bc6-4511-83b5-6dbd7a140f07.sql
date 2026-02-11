@@ -1,0 +1,1 @@
+ALTER TABLE public.tasks ADD COLUMN risk_description text NOT NULL DEFAULT '';

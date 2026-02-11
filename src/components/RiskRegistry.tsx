@@ -27,8 +27,20 @@ function getRiskCellBg(impact: number, probability: number): string {
 export function RiskRegistry() {
   const { project, updateTask } = useProject();
 
+  // Recursively flatten all tasks including subtasks
+  function flattenAllTasks(tasks: typeof project.buckets[0]['tasks']): typeof project.buckets[0]['tasks'] {
+    const result: typeof project.buckets[0]['tasks'] = [];
+    for (const t of tasks) {
+      result.push(t);
+      if (t.subTasks.length > 0) {
+        result.push(...flattenAllTasks(t.subTasks));
+      }
+    }
+    return result;
+  }
+
   const flaggedTasks = project.buckets.flatMap(b =>
-    b.tasks
+    flattenAllTasks(b.tasks)
       .filter(t => t.flaggedAsRisk)
       .map(t => ({ ...t, bucketName: b.name, bucketColor: b.color }))
   );
