@@ -340,6 +340,38 @@ export type Database = {
           },
         ]
       }
+      stakeholder_sentiment_history: {
+        Row: {
+          created_at: string
+          id: string
+          recorded_at: string
+          sentiment: string
+          stakeholder_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          recorded_at?: string
+          sentiment?: string
+          stakeholder_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          recorded_at?: string
+          sentiment?: string
+          stakeholder_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stakeholder_sentiment_history_stakeholder_id_fkey"
+            columns: ["stakeholder_id"]
+            isOneToOne: false
+            referencedRelation: "stakeholders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stakeholders: {
         Row: {
           communication_plan: string
