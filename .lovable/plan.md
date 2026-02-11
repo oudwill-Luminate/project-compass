@@ -1,60 +1,24 @@
 
 
-## Add Task Progress Tracking
+## Fix Progress Display on Timeline View Bars
 
-Add a percentage-based progress field to tasks that shows how much of the planned effort is complete. This applies only when a task is in the "Working on it" status.
+The timeline bar gradient code exists but isn't producing a visible effect. Two issues need to be fixed:
 
-### Database Changes
+### Issue 1: Insufficient Visual Contrast
+The current gradient uses `${statusColor}66` (just 40% opacity hex suffix) for the unfilled portion, which looks almost identical to the filled portion on most status colors. The unfilled section needs to be much more transparent to create a clear visual distinction.
 
-**Migration: Add `progress` column to `tasks` table**
-- `progress INTEGER NOT NULL DEFAULT 0` -- value from 0 to 100
+**Fix in `src/components/TimelineView.tsx`** (around line 97):
+- Change `${statusColor}66` to `${statusColor}33` (20% opacity) for a much more visible contrast between the filled and unfilled portions of the bar.
 
-### Type Changes
+### Issue 2: Parent Tasks with "Working" Status
+Parent tasks (those with sub-tasks) have `isWorking` forced to `false` because of the `&& !hasSubTasks` check. If a parent task itself is marked as "working" with progress, the gradient won't show. For parent tasks, the progress should be calculated as the average of children's progress.
 
-**`src/types/project.ts`**
-- Add `progress: number` to the `Task` interface (0-100)
+**Fix in `src/components/TimelineView.tsx`**:
+- For parent tasks with "working" status, calculate rolled-up progress from children
+- Apply the same gradient logic to parent task bars
 
-### Data Layer Changes
-
-**`src/hooks/useProjectData.ts`**
-- Read `progress` from the task row in `buildTaskTree`
-- Include `progress` in the `TaskRow` interface
-- Write `progress` in `updateTask`
-- Default new tasks to `progress: 0`
-
-### UI Changes
-
-**1. Task Dialog (`src/components/TaskDialog.tsx`)**
-- Add a "Progress (%)" slider or number input, visible when status is "Working on it"
-- Automatically reset progress to 0 when status changes away from "working", and to 100 when set to "done"
-
-**2. Table View Status Bubble (`src/components/TaskRow.tsx`)**
-- When status is "working", render the status pill with a partial fill effect:
-  - Use a CSS gradient background: the left portion (progress%) filled with the solid status color, the right portion with a lighter/transparent version
-  - Display the percentage text inside the pill (e.g., "Working 25%")
-
-**3. Timeline View Bar (`src/components/TimelineView.tsx`)**
-- When status is "working", show the progress as a partial fill on the task bar:
-  - The left portion (progress%) of the bar is the full status color
-  - The right portion is the same color but at reduced opacity (e.g., 40%)
-  - This creates a clear visual indicator of how far along the task is
-
-### Visual Example (Table View)
-The "Working on it" pill currently looks like a solid orange pill. With 25% progress, the left 25% will be solid orange and the remaining 75% will be a lighter shade, making the progress immediately visible.
-
-### Visual Example (Timeline View)
-The task bar will show a solid color for the completed portion and a semi-transparent version for the remaining portion, similar to how progress bars typically render.
-
-### Parent Task Roll-up
-For parent tasks with sub-tasks, the progress will be automatically calculated as the average of all children's progress values (with "done" children counting as 100% and "not-started" counting as 0%).
-
-### Summary of Files Changed
-| File | Action |
+### Files Changed
+| File | Change |
 |------|--------|
-| `supabase/migrations/` | New migration adding `progress` column |
-| `src/types/project.ts` | Add `progress` to Task interface |
-| `src/hooks/useProjectData.ts` | Read/write progress field |
-| `src/components/TaskDialog.tsx` | Add progress input when status is "working" |
-| `src/components/TaskRow.tsx` | Partial-fill status pill |
-| `src/components/TimelineView.tsx` | Partial-fill timeline bar |
+| `src/components/TimelineView.tsx` | Increase gradient contrast and support parent task progress display |
 
