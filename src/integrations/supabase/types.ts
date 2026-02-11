@@ -144,6 +144,47 @@ export type Database = {
         }
         Relationships: []
       }
+      risk_snapshots: {
+        Row: {
+          created_at: string
+          critical_count: number
+          high_count: number
+          id: string
+          low_count: number
+          medium_count: number
+          project_id: string
+          snapshot_date: string
+        }
+        Insert: {
+          created_at?: string
+          critical_count?: number
+          high_count?: number
+          id?: string
+          low_count?: number
+          medium_count?: number
+          project_id: string
+          snapshot_date?: string
+        }
+        Update: {
+          created_at?: string
+          critical_count?: number
+          high_count?: number
+          id?: string
+          low_count?: number
+          medium_count?: number
+          project_id?: string
+          snapshot_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "risk_snapshots_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           actual_cost: number
