@@ -1,20 +1,26 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { TaskRow } from './TaskRow';
 import { cn } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
-function InlineInput({ placeholder, onSubmit, onCancel }: { placeholder: string; onSubmit: (value: string) => void; onCancel: () => void }) {
-  const [value, setValue] = useState('');
+function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { placeholder: string; onSubmit: (value: string) => void; onCancel: () => void; initialValue?: string }) {
+  const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && value.trim()) { onSubmit(value.trim()); setValue(''); }
+    if (e.key === 'Enter' && value.trim()) { onSubmit(value.trim()); }
     if (e.key === 'Escape') onCancel();
   };
 
@@ -26,15 +32,16 @@ function InlineInput({ placeholder, onSubmit, onCancel }: { placeholder: string;
       onKeyDown={handleKeyDown}
       onBlur={() => { if (value.trim()) onSubmit(value.trim()); else onCancel(); }}
       placeholder={placeholder}
-      className="bg-transparent border-b border-primary/40 text-sm px-1 py-0.5 outline-none text-foreground placeholder:text-muted-foreground w-64"
+      className="bg-transparent border-b border-primary/40 text-sm px-1 py-0.5 outline-none text-foreground placeholder:text-muted-foreground w-64 font-bold"
     />
   );
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, addTask, moveTask } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, addTask, moveTask, deleteTask } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
   const [addingTaskInBucket, setAddingTaskInBucket] = useState<string | null>(null);
+  const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
 
   const totalEstimated = project.buckets.reduce(
     (sum, b) => sum + b.tasks.reduce((s, t) => s + t.estimatedCost, 0), 0
@@ -47,9 +54,7 @@ export function TableView() {
   const handleDragEnd = useCallback((result: DropResult) => {
     if (!result.destination) return;
     const { draggableId, destination } = result;
-    const newBucketId = destination.droppableId;
-    const newPosition = destination.index;
-    moveTask(draggableId, newBucketId, newPosition);
+    moveTask(draggableId, destination.droppableId, destination.index);
   }, [moveTask]);
 
   return (
@@ -90,19 +95,37 @@ export function TableView() {
 
               return (
                 <div key={bucket.id} className="rounded-xl border overflow-hidden shadow-sm">
-                  <button
-                    onClick={() => toggleBucket(bucket.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
+                  {/* Bucket Header */}
+                  <div
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                     style={{ borderLeft: `4px solid ${bucket.color}` }}
                   >
-                    {bucket.collapsed ? (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    <button onClick={() => toggleBucket(bucket.id)} className="shrink-0">
+                      {bucket.collapsed ? (
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </button>
+
+                    {editingBucketId === bucket.id ? (
+                      <InlineInput
+                        placeholder="Group name…"
+                        initialValue={bucket.name}
+                        onSubmit={(name) => { updateBucket(bucket.id, { name }); setEditingBucketId(null); }}
+                        onCancel={() => setEditingBucketId(null)}
+                      />
                     ) : (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      <button
+                        onClick={() => toggleBucket(bucket.id)}
+                        onDoubleClick={(e) => { e.stopPropagation(); setEditingBucketId(bucket.id); }}
+                        className="font-bold text-sm text-left"
+                        style={{ color: bucket.color }}
+                      >
+                        {bucket.name}
+                      </button>
                     )}
-                    <span className="font-bold text-sm" style={{ color: bucket.color }}>
-                      {bucket.name}
-                    </span>
+
                     <span className="text-xs text-muted-foreground">
                       {bucket.tasks.length} tasks
                     </span>
@@ -111,7 +134,29 @@ export function TableView() {
                         {format(bucketStart, 'MMM dd')} – {format(bucketEnd, 'MMM dd')}
                       </span>
                     )}
-                  </button>
+
+                    {/* Bucket Actions */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1.5 rounded-md hover:bg-muted transition-colors shrink-0" onClick={e => e.stopPropagation()}>
+                          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bg-popover">
+                        <DropdownMenuItem onClick={() => setEditingBucketId(bucket.id)}>
+                          <Pencil className="w-3.5 h-3.5 mr-2" />
+                          Rename Group
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => { if (confirm(`Delete "${bucket.name}" and all its tasks?`)) deleteBucket(bucket.id); }}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 mr-2" />
+                          Delete Group
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
 
                   <AnimatePresence initial={false}>
                     {!bucket.collapsed && (
@@ -256,4 +301,3 @@ export function TableView() {
     </div>
   );
 }
-
