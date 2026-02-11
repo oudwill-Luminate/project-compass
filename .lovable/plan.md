@@ -1,69 +1,57 @@
 
 
-## Implement Professional Dependency Auto-Scheduling
+## Add Task-Level Contingency Buffer Time
 
-### Problem
-Currently, when you set a Finish-to-Start (FS) dependency (e.g., "Water Lines depends on Drainage"), the system only shifts dependent tasks when dates are manually changed. It does **not** auto-schedule the dependent task's dates when the dependency link is first created or when the dependency type changes.
+### What This Does
+Adds the ability to set a contingency buffer (in days) on individual tasks, applied at either the start or end of the task. This extends the task's effective timeline to account for uncertainty, without changing the core work dates. The buffer will be visible on the timeline as a distinct shaded region next to the task bar.
 
-### Solution
-Add a proper dependency scheduling engine that:
-1. Automatically repositions a task's dates when a dependency is assigned or changed
-2. Handles all four standard dependency types (FS, FF, SS, SF)
-3. Cascades date changes through the entire dependency chain
-4. Detects circular dependencies to prevent infinite loops
+### How It Works
 
-### Dependency Type Scheduling Rules
+Each task gets two new fields:
+- **Buffer Days** -- number of contingency days (default: 0)
+- **Buffer Position** -- whether the buffer goes before (start) or after (end) the task (default: "end")
 
-```text
-FS (Finish-to-Start): Dependent starts after predecessor finishes
-   Predecessor:  |======|
-   Dependent:              |======|
-   Rule: dependent.start = predecessor.end + 1 day
+For example, a "Drainage" task running Feb 10-17 with a 3-day end buffer would show:
+- Core bar: Feb 10-17 (solid color)
+- Buffer bar: Feb 18-20 (striped/hatched, lighter shade)
 
-FF (Finish-to-Finish): Both finish at the same time
-   Predecessor:  |======|
-   Dependent:       |======|
-   Rule: dependent.end = predecessor.end, start adjusted to keep duration
+When dependency scheduling is active, the buffer is factored in. An FS dependency on a task with an end buffer means the next task starts after the buffer ends, not after the core task ends.
 
-SS (Start-to-Start): Both start at the same time
-   Predecessor:  |======|
-   Dependent:    |======|
-   Rule: dependent.start = predecessor.start, end adjusted to keep duration
+### Changes
 
-SF (Start-to-Finish): Dependent finishes when predecessor starts
-   Predecessor:        |======|
-   Dependent:  |======|
-   Rule: dependent.end = predecessor.start - 1 day, start adjusted to keep duration
-```
+**1. Database Migration**
+Add two columns to the `tasks` table:
+- `buffer_days` (integer, default 0, not null)
+- `buffer_position` (text, default 'end', not null) -- values: 'start' or 'end'
 
-### Technical Changes
+**2. Type Definition (`src/types/project.ts`)**
+Add to the `Task` interface:
+- `bufferDays: number`
+- `bufferPosition: 'start' | 'end'`
 
-**`src/hooks/useProjectData.ts` -- `updateTask` function:**
+**3. Data Layer (`src/hooks/useProjectData.ts`)**
+- Map `buffer_days` and `buffer_position` from the database in `buildTaskTree`
+- Include them in `TaskRow` interface and DB update mapping in `updateTask`
+- Update `scheduleTask` to factor buffer into dependency calculations:
+  - For FS: dependent starts after predecessor's end + predecessor's end buffer
+  - For SS: dependent starts at predecessor's start (minus start buffer if applicable)
+  - Similar adjustments for FF and SF
+- Include buffer fields when creating new tasks (defaults: 0 days, 'end')
 
-- Extract a reusable `scheduleDependentTask(predecessorTask, dependentTask, dependencyType)` function that calculates and returns the new start/end dates for the dependent task
-- When `dependsOn` or `dependencyType` changes on a task:
-  1. Look up the predecessor task
-  2. Calculate new dates using the dependency type rules
-  3. Update the task's dates in the database
-  4. Cascade: find all tasks that depend on this task and recursively reschedule them
-- When a predecessor's dates change (existing logic), use the same scheduling function to propagate to all dependents with correct dependency-type math (replacing the current simple "shift by delta" approach)
-- Add circular dependency detection (track visited task IDs) to prevent infinite loops
+**4. Task Edit Dialog (`src/components/TaskDialog.tsx`)**
+Add a new "Contingency Buffer" section below the Dates/Duration row:
+- A number input for buffer days
+- A toggle/select for buffer position (Start / End)
+- Only shown when buffer days > 0 or always visible with 0 as default
 
-**`src/components/TaskDialog.tsx` -- dependency change handling:**
+**5. Timeline View (`src/components/TimelineView.tsx`)**
+- For each task with `bufferDays > 0`, render a second bar segment next to the main task bar
+- Buffer bar uses the same status color but with reduced opacity and a striped pattern to visually distinguish it
+- If buffer position is 'end': buffer bar appears immediately after the task bar
+- If buffer position is 'start': buffer bar appears immediately before the task bar
+- Tooltip includes buffer information
 
-- When the user changes `dependsOn` or `dependencyType` in the dialog, ensure the saved updates include both the dependency fields AND the recalculated dates, so the `updateTask` function processes them together
-
-**`src/hooks/useProjectData.ts` -- new helper function:**
-
-```
-scheduleTask(predecessor, dependent, depType) -> { startDate, endDate }
-```
-
-This function computes the correct dates for each dependency type while preserving the dependent task's duration.
-
-### Edge Cases Handled
-- Circular dependency prevention (visited set)
-- Removing a dependency (setting to "none") -- no date changes needed
-- Changing dependency type on an existing link -- reschedules immediately
-- Chain cascading: A -> B -> C, changing A's dates propagates through B then C
+**6. Table View (`src/components/TaskRow.tsx`)**
+- Show a small buffer indicator icon or badge next to the dates when buffer > 0
+- Include buffer in rolled-up date calculations for parent tasks
 
