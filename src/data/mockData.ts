@@ -12,7 +12,7 @@ const owners: Owner[] = [
   { id: 'o5', name: 'Chris Park', color: '#E2445C' },
 ];
 
-const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTasks' | 'bufferDays' | 'bufferPosition' | 'responsible' | 'progress' | 'riskDescription'> & { bufferDays?: number; bufferPosition?: 'start' | 'end'; responsible?: string | null; progress?: number; riskDescription?: string }): import('@/types/project').Task => ({
+const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTasks' | 'bufferDays' | 'bufferPosition' | 'responsible' | 'progress' | 'riskDescription' | 'baselineStartDate' | 'baselineEndDate'> & { bufferDays?: number; bufferPosition?: 'start' | 'end'; responsible?: string | null; progress?: number; riskDescription?: string }): import('@/types/project').Task => ({
   ...props,
   parentTaskId: null,
   bufferDays: props.bufferDays ?? 0,
@@ -20,6 +20,8 @@ const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTask
   responsible: props.responsible ?? null,
   riskDescription: props.riskDescription ?? '',
   progress: props.progress ?? 0,
+  baselineStartDate: null,
+  baselineEndDate: null,
   subTasks: [],
 });
 

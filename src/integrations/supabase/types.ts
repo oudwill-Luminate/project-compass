@@ -232,6 +232,8 @@ export type Database = {
       tasks: {
         Row: {
           actual_cost: number
+          baseline_end_date: string | null
+          baseline_start_date: string | null
           bucket_id: string
           buffer_days: number
           buffer_position: string
@@ -258,6 +260,8 @@ export type Database = {
         }
         Insert: {
           actual_cost?: number
+          baseline_end_date?: string | null
+          baseline_start_date?: string | null
           bucket_id: string
           buffer_days?: number
           buffer_position?: string
@@ -284,6 +288,8 @@ export type Database = {
         }
         Update: {
           actual_cost?: number
+          baseline_end_date?: string | null
+          baseline_start_date?: string | null
           bucket_id?: string
           buffer_days?: number
           buffer_position?: string
