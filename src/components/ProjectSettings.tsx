@@ -4,6 +4,7 @@ import { useProject } from '@/context/ProjectContext';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +20,7 @@ import { toast } from 'sonner';
 import { Settings, Trash2 } from 'lucide-react';
 
 export function ProjectSettings() {
-  const { project, updateProjectName, updateContingency, deleteProject } = useProject();
+  const { project, updateProjectName, updateContingency, updateIncludeWeekends, deleteProject } = useProject();
   const navigate = useNavigate();
 
   const [name, setName] = useState(project.name);
@@ -89,6 +90,20 @@ export function ProjectSettings() {
             <p className="text-xs text-muted-foreground">
               Applied as a buffer to the total project budget.
             </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Label htmlFor="include-weekends">Include Weekends</Label>
+              <p className="text-xs text-muted-foreground">
+                When enabled, Saturdays and Sundays are treated as working days for scheduling.
+              </p>
+            </div>
+            <Switch
+              id="include-weekends"
+              checked={project.includeWeekends}
+              onCheckedChange={(checked) => updateIncludeWeekends(checked)}
+            />
           </div>
 
           <Button onClick={handleSave} disabled={!hasChanges || saving || !name.trim()}>

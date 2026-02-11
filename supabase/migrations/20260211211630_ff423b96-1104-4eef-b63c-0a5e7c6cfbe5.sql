@@ -1,0 +1,1 @@
+ALTER TABLE public.projects ADD COLUMN include_weekends boolean NOT NULL DEFAULT false;
