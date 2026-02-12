@@ -27,13 +27,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Plus, Trash2, Users2, MessageSquare, CalendarIcon, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Plus, Trash2, Users2, MessageSquare, CalendarIcon, AlertTriangle, TrendingUp, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format, differenceInDays, parseISO, subDays } from 'date-fns';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 type EngagementLevel = 'unaware' | 'resistant' | 'neutral' | 'supportive' | 'leading';
 type Sentiment = 'positive' | 'neutral' | 'negative';
@@ -80,7 +86,45 @@ const SENTIMENT_CONFIG: Record<Sentiment, { label: string; border: string; dot: 
   negative: { label: 'Negative', border: 'ring-2 ring-red-500', dot: 'bg-red-500' },
 };
 
-const SENTIMENT_NUMERIC: Record<string, number> = { positive: 1, neutral: 0, negative: -1 };
+const POWER_LABELS: Record<number, string> = {
+  1: 'Minimal: No authority over project decisions',
+  2: 'Low: Can influence minor decisions',
+  3: 'Moderate: Controls some resources or approvals',
+  4: 'High: Key decision-maker or budget holder',
+  5: 'Critical: Executive sponsor or veto power',
+};
+
+const INTEREST_LABELS: Record<number, string> = {
+  1: 'Minimal: Unaffected by project outcomes',
+  2: 'Low: Peripherally aware',
+  3: 'Moderate: Somewhat affected by results',
+  4: 'High: Directly impacted by deliverables',
+  5: 'Critical: Core dependency on project success',
+};
+
+const POWER_SHORT: Record<number, string> = { 1: 'Minimal', 2: 'Low', 3: 'Moderate', 4: 'High', 5: 'Critical' };
+const INTEREST_SHORT: Record<number, string> = { 1: 'Minimal', 2: 'Low', 3: 'Moderate', 4: 'High', 5: 'Critical' };
+
+const COMM_PLAN_OPTIONS = [
+  'Weekly Email Update',
+  'Bi-Weekly Meeting',
+  'Monthly Report',
+  'Quarterly Review',
+  'Ad-Hoc / As Needed',
+  'Daily Standup',
+  'Steering Committee',
+];
+
+const SENTINEL_OTHER = '__other__';
+
+const MATRIX_LEGEND = [
+  { title: 'Manage Closely', desc: 'High Power, High Interest — Active engagement, frequent communication', className: 'bg-destructive/10 text-destructive' },
+  { title: 'Keep Satisfied', desc: 'High Power, Low Interest — Address concerns, avoid overload', className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
+  { title: 'Keep Informed', desc: 'Low Power, High Interest — Regular updates, leverage as advocates', className: 'bg-primary/10 text-primary' },
+  { title: 'Monitor', desc: 'Low Power, Low Interest — Minimal effort, periodic check-ins', className: 'bg-muted text-muted-foreground' },
+];
+
+/* ── Helper: overdue check ── */
 
 /* ── Helper: overdue check ── */
 function isOverdue(s: Stakeholder): boolean {
@@ -230,7 +274,7 @@ function SentimentHistoryChart({ projectId }: { projectId: string }) {
                 tickFormatter={v => format(parseISO(v), 'MMM d')}
               />
               <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-              <Tooltip
+              <RechartsTooltip
                 labelFormatter={v => format(parseISO(v as string), 'PPP')}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
               />
@@ -453,9 +497,19 @@ export function StakeholdersView() {
         {/* Matrix + Chart side by side */}
         {stakeholders.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <Label className="text-sm font-semibold mb-3 block">Power / Interest Matrix</Label>
-              <PowerInterestMatrix stakeholders={stakeholders} />
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm font-semibold mb-3 block">Power / Interest Matrix</Label>
+                <PowerInterestMatrix stakeholders={stakeholders} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {MATRIX_LEGEND.map(q => (
+                  <div key={q.title} className={cn('rounded-lg px-3 py-2', q.className)}>
+                    <p className="text-xs font-semibold">{q.title}</p>
+                    <p className="text-[10px] opacity-80">{q.desc}</p>
+                  </div>
+                ))}
+              </div>
             </div>
             <SentimentHistoryChart key={chartKey} projectId={project.id} />
           </div>
@@ -468,8 +522,30 @@ export function StakeholdersView() {
               <TableRow className="bg-muted/30">
                 <TableHead className="w-[160px]">Name</TableHead>
                 <TableHead className="w-[120px]">Role</TableHead>
-                <TableHead className="w-[70px] text-center">Power</TableHead>
-                <TableHead className="w-[70px] text-center">Interest</TableHead>
+                <TableHead className="w-[90px] text-center">
+                  <TooltipProvider>
+                    <UITooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex items-center gap-1 cursor-help">Power <Info className="w-3 h-3 text-muted-foreground" /></span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-[220px] text-xs space-y-1">
+                        {Object.entries(POWER_LABELS).map(([k, v]) => <p key={k}><strong>{k}</strong> — {v.split(': ')[1]}</p>)}
+                      </TooltipContent>
+                    </UITooltip>
+                  </TooltipProvider>
+                </TableHead>
+                <TableHead className="w-[90px] text-center">
+                  <TooltipProvider>
+                    <UITooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex items-center gap-1 cursor-help">Interest <Info className="w-3 h-3 text-muted-foreground" /></span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-[220px] text-xs space-y-1">
+                        {Object.entries(INTEREST_LABELS).map(([k, v]) => <p key={k}><strong>{k}</strong> — {v.split(': ')[1]}</p>)}
+                      </TooltipContent>
+                    </UITooltip>
+                  </TooltipProvider>
+                </TableHead>
                 <TableHead className="w-[120px]">Engagement</TableHead>
                 <TableHead className="w-[110px]">Sentiment</TableHead>
                 <TableHead className="w-[140px]">Last Contact</TableHead>
@@ -506,17 +582,25 @@ export function StakeholdersView() {
                     </TableCell>
                     <TableCell>
                       <Select value={String(s.power)} onValueChange={v => updateStakeholder(s.id, { power: Number(v) })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs w-[90px]"><SelectValue /></SelectTrigger>
                         <SelectContent className="bg-popover">
-                          {[1, 2, 3, 4, 5].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                          {[1, 2, 3, 4, 5].map(n => (
+                            <SelectItem key={n} value={String(n)}>
+                              <span className="text-xs">{n} - {POWER_SHORT[n]}</span>
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </TableCell>
                     <TableCell>
                       <Select value={String(s.interest)} onValueChange={v => updateStakeholder(s.id, { interest: Number(v) })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs w-[90px]"><SelectValue /></SelectTrigger>
                         <SelectContent className="bg-popover">
-                          {[1, 2, 3, 4, 5].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                          {[1, 2, 3, 4, 5].map(n => (
+                            <SelectItem key={n} value={String(n)}>
+                              <span className="text-xs">{n} - {INTEREST_SHORT[n]}</span>
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </TableCell>
@@ -579,12 +663,40 @@ export function StakeholdersView() {
                       </Popover>
                     </TableCell>
                     <TableCell>
-                      <Input
-                        value={s.communicationPlan}
-                        onChange={e => updateStakeholder(s.id, { communicationPlan: e.target.value })}
-                        placeholder="e.g. Weekly Email"
-                        className="h-8 text-sm"
-                      />
+                      {(() => {
+                        const isOther = s.communicationPlan && !COMM_PLAN_OPTIONS.includes(s.communicationPlan);
+                        const selectValue = isOther ? SENTINEL_OTHER : (s.communicationPlan || '');
+                        return (
+                          <div className="space-y-1">
+                            <Select
+                              value={selectValue}
+                              onValueChange={v => {
+                                if (v === SENTINEL_OTHER) {
+                                  updateStakeholder(s.id, { communicationPlan: '' });
+                                } else {
+                                  updateStakeholder(s.id, { communicationPlan: v });
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select plan…" /></SelectTrigger>
+                              <SelectContent className="bg-popover">
+                                {COMM_PLAN_OPTIONS.map(opt => (
+                                  <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                ))}
+                                <SelectItem value={SENTINEL_OTHER}>Other (custom)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {(selectValue === SENTINEL_OTHER || isOther) && (
+                              <Input
+                                value={s.communicationPlan}
+                                onChange={e => updateStakeholder(s.id, { communicationPlan: e.target.value })}
+                                placeholder="Custom plan…"
+                                className="h-7 text-xs"
+                              />
+                            )}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-0.5">
