@@ -90,8 +90,8 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
 
   const duration = useMemo(() => {
     try {
-      return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate));
-    } catch { return 0; }
+      return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate)) + 1;
+    } catch { return 1; }
   }, [formData.startDate, formData.endDate]);
 
   const [durationInput, setDurationInput] = useState<string>('');
@@ -104,7 +104,7 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
     setDurationInput(val);
     const days = parseInt(val, 10);
     if (!isNaN(days) && days > 0) {
-      const newEnd = format(addDays(parseISO(formData.startDate), days), 'yyyy-MM-dd');
+      const newEnd = format(addDays(parseISO(formData.startDate), days - 1), 'yyyy-MM-dd');
       setFormData(prev => ({ ...prev, endDate: newEnd }));
     }
   };
@@ -244,7 +244,7 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
             });
             const rolledStart = effectiveDates.reduce((min, d) => d.s < min ? d.s : min, effectiveDates[0].s);
             const rolledEnd = effectiveDates.reduce((max, d) => d.e > max ? d.e : max, effectiveDates[0].e);
-            const rolledDuration = differenceInDays(parseISO(rolledEnd), parseISO(rolledStart));
+            const rolledDuration = differenceInDays(parseISO(rolledEnd), parseISO(rolledStart)) + 1;
             return (
               <div className="space-y-2">
                 <div className="grid grid-cols-3 gap-3">
@@ -292,7 +292,7 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                       if (!date) return;
                       const newStart = format(date, 'yyyy-MM-dd');
                       const dur = differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate));
-                      const newEnd = format(addDays(date, Math.max(dur, 1)), 'yyyy-MM-dd');
+                      const newEnd = format(addDays(date, Math.max(dur, 0)), 'yyyy-MM-dd');
                       setFormData({ ...formData, startDate: newStart, endDate: newEnd });
                     }}
                     className="pointer-events-auto"
