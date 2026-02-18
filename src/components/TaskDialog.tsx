@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
-import { CalendarIcon, AlertTriangle } from 'lucide-react';
+import { CalendarIcon, AlertTriangle, Info } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { TaskChecklist, ChecklistItem } from '@/components/TaskChecklist';
 import { supabase } from '@/integrations/supabase/client';
@@ -231,6 +231,49 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
           </div>
 
           {/* Dates & Duration */}
+          {task.subTasks && task.subTasks.length > 0 ? (() => {
+            const subs = task.subTasks;
+            const effectiveDates = subs.map(t => {
+              const s = t.bufferDays > 0 && t.bufferPosition === 'start'
+                ? format(addDays(parseISO(t.startDate), -t.bufferDays), 'yyyy-MM-dd')
+                : t.startDate;
+              const e = t.bufferDays > 0 && t.bufferPosition === 'end'
+                ? format(addDays(parseISO(t.endDate), t.bufferDays), 'yyyy-MM-dd')
+                : t.endDate;
+              return { s, e };
+            });
+            const rolledStart = effectiveDates.reduce((min, d) => d.s < min ? d.s : min, effectiveDates[0].s);
+            const rolledEnd = effectiveDates.reduce((max, d) => d.e > max ? d.e : max, effectiveDates[0].e);
+            const rolledDuration = differenceInDays(parseISO(rolledEnd), parseISO(rolledStart));
+            return (
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <Label className="text-xs font-medium">Expected Start</Label>
+                    <Button variant="outline" disabled className="w-full justify-start text-left font-normal mt-1 text-xs">
+                      <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                      {format(parseISO(rolledStart), 'MMM dd, yyyy')}
+                    </Button>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium">Expected Finish</Label>
+                    <Button variant="outline" disabled className="w-full justify-start text-left font-normal mt-1 text-xs">
+                      <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                      {format(parseISO(rolledEnd), 'MMM dd, yyyy')}
+                    </Button>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium">Duration (days)</Label>
+                    <Input type="number" value={rolledDuration} disabled className="mt-1 text-xs" />
+                  </div>
+                </div>
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Info className="h-3 w-3" />
+                  Auto-calculated from {subs.length} sub-task{subs.length > 1 ? 's' : ''}
+                </p>
+              </div>
+            );
+          })() : (
           <div className="grid grid-cols-3 gap-3">
             <div>
               <Label className="text-xs font-medium">Expected Start</Label>
@@ -287,6 +330,7 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               />
             </div>
           </div>
+          )}
 
           {/* Responsible */}
           <div>
