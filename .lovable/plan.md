@@ -1,39 +1,30 @@
 
-
-## Auto-Calculate Dates for Parent Tasks with Sub-Tasks
+## Fix Duration Display in Task Dialog
 
 ### Problem
-When opening a parent task (one with sub-tasks) in the Edit Task dialog, the date fields show editable values even though the table view correctly rolls up dates from sub-tasks. This is confusing because any manual date changes get overridden by the rollup logic anyway.
+When a user enters "1 day" as the duration, the end date is set to the next day (e.g., start April 1, end April 2). Users expect a 1-day task to start and end on the same day.
+
+### Root Cause
+The dialog calculates duration as `differenceInDays(endDate, startDate)` which is exclusive (Apr 1 to Apr 1 = 0). When the user types "1", it does `addDays(startDate, 1)` setting the end to the next day.
 
 ### Solution
-When a task has sub-tasks, replace the editable date pickers with a read-only display showing the auto-calculated dates, along with a clear label indicating they are derived from sub-tasks.
+Adjust TaskDialog.tsx to use **inclusive** duration for display and input, while keeping the underlying data model unchanged (so timeline, critical path, and other calculations continue working correctly).
 
 ### Changes
 
 **File: `src/components/TaskDialog.tsx`**
 
-In the Dates and Duration section (around lines 233-289):
+Three targeted fixes:
 
-- Detect if `task.subTasks.length > 0` (parent task)
-- If parent: show the rolled-up start/end dates as read-only styled text (not editable pickers), with a small note like "Auto-calculated from sub-tasks". Disable the Duration input as well.
-- If not a parent: keep the current editable date pickers and duration input as-is
+1. **Duration display** (line ~93): Change from `differenceInDays(end, start)` to `differenceInDays(end, start) + 1` so a same-day task shows "1 day"
 
-The rolled-up dates will be computed using the same `getRolledUp` logic already used in `TaskRow.tsx`. We will import or inline a lightweight version that computes the min start and max end from `task.subTasks`.
+2. **Duration input handler** (line ~107): Change from `addDays(start, days)` to `addDays(start, days - 1)` so typing "1" keeps end date = start date
 
-### Technical Detail
+3. **Start date change handler** (line ~294-295): Preserve the current inclusive duration when the user picks a new start date, adjusting the `addDays` call similarly
 
-```text
-IF task.subTasks.length > 0:
-  +------------------------------------------------------+
-  | Expected Start     Expected Finish    Duration (days) |
-  | [icon] Feb 18      [icon] Feb 25      7               |
-  | (i) Auto-calculated from 3 sub-tasks                  |
-  +------------------------------------------------------+
-ELSE:
-  (current editable pickers, unchanged)
-```
+4. **Rolled-up duration for parent tasks** (line ~247): Also add `+ 1` to the read-only rolled-up duration display for consistency
 
-- Compute earliest start and latest end from `task.subTasks` (accounting for buffer days/position)
-- Display as disabled/read-only buttons styled consistently with the existing date buttons
-- Add a muted info line below: "Auto-calculated from N sub-tasks"
-- Duration is also shown read-only as the difference between the two dates
+### What stays the same
+- The stored `startDate` and `endDate` values in the database remain unchanged
+- Timeline rendering, critical path analysis, resource leveling, and all other calculations are unaffected
+- Only the TaskDialog's display of "Duration (days)" changes to be inclusive (human-intuitive)
