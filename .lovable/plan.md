@@ -1,30 +1,25 @@
 
-## Fix Duration Display in Task Dialog
+## Fix: Use Rolled-Up Dates When Scheduling Against Parent Task Dependencies
 
 ### Problem
-When a user enters "1 day" as the duration, the end date is set to the next day (e.g., start April 1, end April 2). Users expect a 1-day task to start and end on the same day.
+When a task depends on a parent task (one with sub-tasks), the scheduling engine uses the parent's *stored* database dates instead of the *rolled-up* dates calculated from its sub-tasks. For example, "Signage Lightbox Removal" depends on "Demolition/Space Reset" (which ends Apr 04 based on sub-tasks), but the scheduling still uses the parent's original stored dates (Feb 18), resulting in incorrect start/end dates for the dependent task.
 
 ### Root Cause
-The dialog calculates duration as `differenceInDays(endDate, startDate)` which is exclusive (Apr 1 to Apr 1 = 0). When the user types "1", it does `addDays(startDate, 1)` setting the end to the next day.
+In `useProjectData.ts`, line ~410, the predecessor is fetched from `allTasks` which returns tasks with their raw stored dates. For parent tasks, the actual effective dates should be the min(sub-task starts) and max(sub-task ends), accounting for buffers -- but this rollup is only done in the UI layer (`TaskRow.tsx`), not in the scheduling logic.
 
 ### Solution
-Adjust TaskDialog.tsx to use **inclusive** duration for display and input, while keeping the underlying data model unchanged (so timeline, critical path, and other calculations continue working correctly).
+Add a helper function that computes rolled-up effective dates for any task (returning stored dates for leaf tasks, rolled-up dates for parents). Use this when looking up the predecessor in the dependency scheduling logic.
 
-### Changes
+### Technical Details
 
-**File: `src/components/TaskDialog.tsx`**
+**File: `src/hooks/useProjectData.ts`**
 
-Three targeted fixes:
+1. Add a utility function `getEffectiveDates(task)` that:
+   - If `task.subTasks.length === 0`, returns `{ startDate, endDate }` as-is
+   - If sub-tasks exist, computes min start / max end from sub-tasks (same logic as `getRolledUp` in TaskRow.tsx), accounting for buffer days/position
 
-1. **Duration display** (line ~93): Change from `differenceInDays(end, start)` to `differenceInDays(end, start) + 1` so a same-day task shows "1 day"
+2. Update the dependency scheduling block (~line 410-418) to use `getEffectiveDates(predecessor)` when constructing the predecessor object passed to `scheduleTask`, so the correct rolled-up dates are used
 
-2. **Duration input handler** (line ~107): Change from `addDays(start, days)` to `addDays(start, days - 1)` so typing "1" keeps end date = start date
+3. Similarly update the `cascade_task_dates` call path -- when a parent task's sub-task dates change, ensure the cascade uses the rolled-up dates
 
-3. **Start date change handler** (line ~294-295): Preserve the current inclusive duration when the user picks a new start date, adjusting the `addDays` call similarly
-
-4. **Rolled-up duration for parent tasks** (line ~247): Also add `+ 1` to the read-only rolled-up duration display for consistency
-
-### What stays the same
-- The stored `startDate` and `endDate` values in the database remain unchanged
-- Timeline rendering, critical path analysis, resource leveling, and all other calculations are unaffected
-- Only the TaskDialog's display of "Duration (days)" changes to be inclusive (human-intuitive)
+This ensures that any task depending on a parent task will be scheduled relative to the parent's actual (rolled-up) date range, not its stale stored dates.
