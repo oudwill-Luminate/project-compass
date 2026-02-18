@@ -377,6 +377,30 @@ export function useProjectData(projectId: string | undefined) {
     };
 
     setProject(proj);
+
+    // Reconcile: fix tasks depending on parent tasks whose rolled-up dates differ from stored
+    const allTasksFlat = buckets.flatMap(b => flattenTasks(b.tasks));
+    const includeWeekends = projData.include_weekends ?? false;
+    for (const task of allTasksFlat) {
+      if (!task.dependsOn) continue;
+      const pred = allTasksFlat.find(t => t.id === task.dependsOn);
+      if (!pred || pred.subTasks.length === 0) continue;
+      const eff = getEffectiveDates(pred);
+      const scheduled = scheduleTask(
+        { ...pred, startDate: eff.startDate, endDate: eff.endDate },
+        task,
+        task.dependencyType,
+        includeWeekends
+      );
+      if (scheduled.startDate !== task.startDate || scheduled.endDate !== task.endDate) {
+        // Update in DB silently — fetchAll will be triggered by realtime
+        supabase.from('tasks').update({
+          start_date: scheduled.startDate,
+          end_date: scheduled.endDate,
+        }).eq('id', task.id).then(() => {});
+      }
+    }
+
     setMembers(memberRows.map((m: any) => ({
       id: m.id,
       user_id: m.user_id,
@@ -534,6 +558,26 @@ export function useProjectData(projectId: string | undefined) {
         _new_end: updatedTask.endDate,
         _include_weekends: project.includeWeekends,
       });
+
+      // If this task is a sub-task, also cascade from the parent using rolled-up dates,
+      // so any task depending on the parent gets rescheduled correctly.
+      if (oldTask.parentTaskId) {
+        const parentTask = allTasks.find(t => t.id === oldTask.parentTaskId);
+        if (parentTask) {
+          // Recompute parent's rolled-up dates after this sub-task update
+          const updatedParentSubs = parentTask.subTasks.map(s =>
+            s.id === taskId ? { ...s, ...updates } : s
+          );
+          const tempParent = { ...parentTask, subTasks: updatedParentSubs };
+          const parentEffective = getEffectiveDates(tempParent);
+          await supabase.rpc('cascade_task_dates', {
+            _task_id: parentTask.id,
+            _new_start: parentEffective.startDate,
+            _new_end: parentEffective.endDate,
+            _include_weekends: project.includeWeekends,
+          });
+        }
+      }
     }
 
     // Refetch to sync all cascaded changes
