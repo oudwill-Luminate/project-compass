@@ -163,6 +163,27 @@ function addSubTaskToTree(tasks: Task[], parentTaskId: string, newTask: Task): T
   });
 }
 
+/** Compute the effective (rolled-up) start/end dates for a task.
+ *  Leaf tasks return their stored dates; parent tasks return min(sub-start) / max(sub-end),
+ *  accounting for buffer days/position on each sub-task. */
+function getEffectiveDates(task: Task): { startDate: string; endDate: string } {
+  if (task.subTasks.length === 0) {
+    return { startDate: task.startDate, endDate: task.endDate };
+  }
+  const effectiveDates = task.subTasks.map(t => {
+    const s = t.bufferDays > 0 && t.bufferPosition === 'start'
+      ? format(addDays(parseISO(t.startDate), -t.bufferDays), 'yyyy-MM-dd')
+      : t.startDate;
+    const e = t.bufferDays > 0 && t.bufferPosition === 'end'
+      ? format(addDays(parseISO(t.endDate), t.bufferDays), 'yyyy-MM-dd')
+      : t.endDate;
+    return { s, e };
+  });
+  const startDate = effectiveDates.reduce((min, d) => d.s < min ? d.s : min, effectiveDates[0].s);
+  const endDate = effectiveDates.reduce((max, d) => d.e > max ? d.e : max, effectiveDates[0].e);
+  return { startDate, endDate };
+}
+
 /** Detect circular dependency: walk the chain from proposedDependsOn and check if we reach taskId.
  *  Returns the chain of task IDs in the cycle, or null if no cycle. */
 function detectCircularDependency(
@@ -409,11 +430,17 @@ export function useProjectData(projectId: string | undefined) {
 
         const predecessor = allTasks.find(t => t.id === predecessorId);
         if (predecessor) {
+          const effectivePred = getEffectiveDates(predecessor);
           const currentTask = {
             startDate: updates.startDate || oldTask.startDate,
             endDate: updates.endDate || oldTask.endDate,
           };
-          const scheduled = scheduleTask(predecessor, currentTask, depType, project.includeWeekends);
+          const scheduled = scheduleTask(
+            { ...predecessor, startDate: effectivePred.startDate, endDate: effectivePred.endDate },
+            currentTask,
+            depType,
+            project.includeWeekends
+          );
           updates = { ...updates, startDate: scheduled.startDate, endDate: scheduled.endDate };
         }
       }
