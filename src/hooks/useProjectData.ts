@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Project, Bucket, Task, Owner, DependencyType } from '@/types/project';
+import { Project, Bucket, Task, Owner, DependencyType, TaskStatus, TaskPriority } from '@/types/project';
 import { useAuth } from '@/context/AuthContext';
 import { differenceInDays, parseISO, addDays, format } from 'date-fns';
 import { toast } from 'sonner';
@@ -384,7 +384,7 @@ export function useProjectData(projectId: string | undefined) {
     for (const task of allTasksFlat) {
       if (!task.dependsOn) continue;
       const pred = allTasksFlat.find(t => t.id === task.dependsOn);
-      if (!pred || pred.subTasks.length === 0) continue;
+      if (!pred) continue;
       const eff = getEffectiveDates(pred);
       const scheduled = scheduleTask(
         { ...pred, startDate: eff.startDate, endDate: eff.endDate },
@@ -452,7 +452,46 @@ export function useProjectData(projectId: string | undefined) {
           return;
         }
 
-        const predecessor = allTasks.find(t => t.id === predecessorId);
+        let predecessor = allTasks.find(t => t.id === predecessorId);
+        
+        // DB fallback: if predecessor not found in memory (stale closure), fetch from DB
+        if (!predecessor) {
+          const { data: predRow } = await supabase
+            .from('tasks')
+            .select('*')
+            .eq('id', predecessorId)
+            .single();
+          if (predRow) {
+            predecessor = {
+              id: predRow.id,
+              title: predRow.title,
+              status: predRow.status as TaskStatus,
+              priority: predRow.priority as TaskPriority,
+              owner: { id: predRow.owner_id || '', name: '', color: '#888' },
+              startDate: predRow.start_date,
+              endDate: predRow.end_date,
+              estimatedCost: predRow.estimated_cost,
+              actualCost: predRow.actual_cost,
+              dependsOn: predRow.depends_on,
+              dependencyType: (predRow.dependency_type || 'FS') as DependencyType,
+              flaggedAsRisk: predRow.flagged_as_risk,
+              riskImpact: predRow.risk_impact,
+              riskProbability: predRow.risk_probability,
+              riskDescription: predRow.risk_description,
+              parentTaskId: predRow.parent_task_id,
+              bufferDays: predRow.buffer_days,
+              bufferPosition: (predRow.buffer_position || 'end') as 'start' | 'end',
+              responsible: predRow.responsible,
+              progress: predRow.progress,
+              effortHours: predRow.effort_hours,
+              baselineStartDate: predRow.baseline_start_date,
+              baselineEndDate: predRow.baseline_end_date,
+              realizedCost: predRow.realized_cost,
+              subTasks: [],
+            };
+          }
+        }
+
         if (predecessor) {
           const effectivePred = getEffectiveDates(predecessor);
           const currentTask = {
