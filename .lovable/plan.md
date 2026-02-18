@@ -1,56 +1,39 @@
 
 
-## Stakeholder Score Legends and Communication Plan Enhancements
+## Auto-Calculate Dates for Parent Tasks with Sub-Tasks
 
-### 1. Add Power and Interest Score Descriptions
+### Problem
+When opening a parent task (one with sub-tasks) in the Edit Task dialog, the date fields show editable values even though the table view correctly rolls up dates from sub-tasks. This is confusing because any manual date changes get overridden by the rollup logic anyway.
 
-Add tooltip descriptions to the Power and Interest column headers and to each score option in the dropdowns. This gives stakeholders context on what each score (1-5) means.
+### Solution
+When a task has sub-tasks, replace the editable date pickers with a read-only display showing the auto-calculated dates, along with a clear label indicating they are derived from sub-tasks.
 
-**Score definitions:**
+### Changes
 
-Power:
-- 1 -- Minimal: No authority over project decisions
-- 2 -- Low: Can influence minor decisions
-- 3 -- Moderate: Controls some resources or approvals
-- 4 -- High: Key decision-maker or budget holder
-- 5 -- Critical: Executive sponsor or veto power
+**File: `src/components/TaskDialog.tsx`**
 
-Interest:
-- 1 -- Minimal: Unaffected by project outcomes
-- 2 -- Low: Peripherally aware
-- 3 -- Moderate: Somewhat affected by results
-- 4 -- High: Directly impacted by deliverables
-- 5 -- Critical: Core dependency on project success
+In the Dates and Duration section (around lines 233-289):
 
-Each score in the `SelectItem` dropdown will show the number plus a short label (e.g., "3 - Moderate"). A small info icon with a `Tooltip` will be added next to the "Power" and "Interest" table headers explaining the scale.
+- Detect if `task.subTasks.length > 0` (parent task)
+- If parent: show the rolled-up start/end dates as read-only styled text (not editable pickers), with a small note like "Auto-calculated from sub-tasks". Disable the Duration input as well.
+- If not a parent: keep the current editable date pickers and duration input as-is
 
-### 2. Expand Communication Plan to a Dropdown
+The rolled-up dates will be computed using the same `getRolledUp` logic already used in `TaskRow.tsx`. We will import or inline a lightweight version that computes the min start and max end from `task.subTasks`.
 
-Replace the free-text `Input` for Communication Plan with a `Select` dropdown offering predefined strategies, plus an "Other" option that reveals a text input for custom plans.
+### Technical Detail
 
-**Predefined options:**
-- Weekly Email Update
-- Bi-Weekly Meeting
-- Monthly Report
-- Quarterly Review
-- Ad-Hoc / As Needed
-- Daily Standup
-- Steering Committee
-- Other (custom)
+```text
+IF task.subTasks.length > 0:
+  +------------------------------------------------------+
+  | Expected Start     Expected Finish    Duration (days) |
+  | [icon] Feb 18      [icon] Feb 25      7               |
+  | (i) Auto-calculated from 3 sub-tasks                  |
+  +------------------------------------------------------+
+ELSE:
+  (current editable pickers, unchanged)
+```
 
-When "Other" is selected, a small text input will appear for custom entry.
-
----
-
-### Technical Details
-
-**File to modify:** `src/components/StakeholdersView.tsx`
-
-**Changes:**
-- Add `POWER_LABELS` and `INTEREST_LABELS` config objects mapping scores 1-5 to short descriptions
-- Update the Power and Interest `Select` dropdowns to show labels alongside numbers (e.g., `"3 - Moderate"`)
-- Add `Tooltip` on table headers with full scale explanation, importing from `@/components/ui/tooltip`
-- Add `COMM_PLAN_OPTIONS` array with predefined communication strategies
-- Replace the Comm. Plan `Input` with a `Select` dropdown; handle "Other" with a conditional text input
-- Add a legend/key section below the Power/Interest Matrix explaining the quadrant strategies
-
+- Compute earliest start and latest end from `task.subTasks` (accounting for buffer days/position)
+- Display as disabled/read-only buttons styled consistently with the existing date buttons
+- Add a muted info line below: "Auto-calculated from N sub-tasks"
+- Duration is also shown read-only as the difference between the two dates
