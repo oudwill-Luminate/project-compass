@@ -434,7 +434,8 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
             </div>
           </div>
 
-          {/* Contingency Buffer */}
+          {/* Contingency Buffer - hidden for parent tasks */}
+          {!(task.subTasks && task.subTasks.length > 0) && (
           <div className="p-3 rounded-lg border space-y-3">
             <div>
               <Label className="text-xs font-medium">Contingency Buffer (days)</Label>
@@ -462,6 +463,7 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               </div>
             )}
           </div>
+          )}
 
           {/* Quality Checklist */}
           {!isNew && (
