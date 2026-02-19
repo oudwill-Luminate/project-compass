@@ -583,18 +583,30 @@ export function useProjectData(projectId: string | undefined) {
       }
     }
 
-    // Only cascade if dates actually changed
+    // Detect buffer changes alongside date changes
     const updatedTask = { ...oldTask, ...updates };
+    const bufferChanged =
+      (updates.bufferDays !== undefined && updates.bufferDays !== oldTask.bufferDays) ||
+      (updates.bufferPosition !== undefined && updates.bufferPosition !== oldTask.bufferPosition);
     const datesChanged =
       (updates.startDate && updates.startDate !== oldTask.startDate) ||
-      (updates.endDate && updates.endDate !== oldTask.endDate);
+      (updates.endDate && updates.endDate !== oldTask.endDate) ||
+      bufferChanged;
 
     if (datesChanged) {
+      // Compute effective dates accounting for buffer
+      const effectiveEnd = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'end'
+        ? format(addWorkingDays(parseISO(updatedTask.endDate), updatedTask.bufferDays, project.includeWeekends), 'yyyy-MM-dd')
+        : updatedTask.endDate;
+      const effectiveStart = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'start'
+        ? format(addWorkingDays(parseISO(updatedTask.startDate), -updatedTask.bufferDays, project.includeWeekends), 'yyyy-MM-dd')
+        : updatedTask.startDate;
+
       // Atomic cascade via database function — all dependents rescheduled in a single transaction
       await supabase.rpc('cascade_task_dates', {
         _task_id: taskId,
-        _new_start: updatedTask.startDate,
-        _new_end: updatedTask.endDate,
+        _new_start: effectiveStart,
+        _new_end: effectiveEnd,
         _include_weekends: project.includeWeekends,
       });
 

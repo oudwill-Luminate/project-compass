@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { differenceInDays, parseISO } from 'date-fns';
+import { toast } from 'sonner';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
-import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff, Target, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, MoreHorizontal, GripVertical, Pencil, Trash2, Settings2, Eye, EyeOff, Target, X, RefreshCw } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
@@ -47,7 +48,7 @@ function InlineInput({ placeholder, onSubmit, onCancel, initialValue = '' }: { p
 }
 
 export function TableView() {
-  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members, setBaseline, clearBaseline, slackDays } = useProject();
+  const { project, toggleBucket, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, members, setBaseline, clearBaseline, slackDays, refreshSchedule } = useProject();
   const [addingBucket, setAddingBucket] = useState(false);
   const [editingBucketId, setEditingBucketId] = useState<string | null>(null);
   const [editDialogBucketId, setEditDialogBucketId] = useState<string | null>(null);
@@ -139,6 +140,18 @@ export function TableView() {
 
           {/* Column Settings & Set Baseline */}
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={async () => {
+                await refreshSchedule();
+                toast('Schedule refreshed', { description: 'All task dates have been recalculated.' });
+              }}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh Schedule
+            </Button>
             <Button
               variant="outline"
               size="sm"
