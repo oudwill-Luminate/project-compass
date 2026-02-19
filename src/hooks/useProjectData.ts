@@ -661,7 +661,11 @@ export function useProjectData(projectId: string | undefined) {
           }
         }
         if (latestScheduled) {
-          updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
+          // Only override dates if the task's current start actually violates the dependency
+          const currentStart = updates.startDate || oldTask.startDate;
+          if (currentStart < latestScheduled.startDate) {
+            updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
+          }
         }
       }
 
