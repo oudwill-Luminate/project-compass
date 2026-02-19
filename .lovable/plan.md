@@ -1,33 +1,62 @@
 
 
-## Fix: Auto-Calculate Dates for Tasks Depending on Any Predecessor (Including Sub-Tasks)
+## Instant Schedule Refresh on Buffer/Date Changes + Manual Refresh Button
 
 ### Problem
-When "Construction of New Interior Walls" is set to depend on "Concrete Re-Pour/Repair" (a sub-task), the start and end dates remain at their defaults (Feb 18) instead of being auto-calculated based on the predecessor's end date (Apr 09).
+When you change the contingency (buffer days) on a task like "Construction of New Interior Walls," its dependent task "Dry-Wall: Phase 1" does not automatically update its start date. This is because the cascade logic only triggers when `startDate` or `endDate` explicitly change -- it ignores changes to `bufferDays` or `bufferPosition`, even though those affect the effective dates used by dependents.
+
+Additionally, there is no manual fallback to force a schedule refresh.
 
 ### Root Cause
-Two issues:
-
-1. **Reconciliation skips leaf predecessors**: In `useProjectData.ts` line 387, the post-fetch reconciliation loop has the guard `if (!pred || pred.subTasks.length === 0) continue;`. This was added to only handle parent-task predecessors, but it **skips all leaf tasks** -- including sub-tasks. So after data loads, tasks depending on sub-tasks are never auto-corrected.
-
-2. **Potential stale closure in updateTask**: When the user sets the dependency in the TaskDialog and saves, `updateTask` tries to find the predecessor in `project.buckets`. If the React state is stale (e.g., the task was just created and a refetch is still pending), the predecessor might not be found, causing the scheduling to silently skip.
+In `useProjectData.ts` (line 588-590), the `datesChanged` check only looks at `startDate` and `endDate`:
+```text
+const datesChanged =
+  (updates.startDate && updates.startDate !== oldTask.startDate) ||
+  (updates.endDate && updates.endDate !== oldTask.endDate);
+```
+When `bufferDays` changes from 5 to 0, the task's own dates don't change, so the cascade never fires and dependents keep their old dates.
 
 ### Solution
 
+**1. Trigger cascade on buffer changes** (`src/hooks/useProjectData.ts`)
+- Expand the `datesChanged` condition to also detect `bufferDays` or `bufferPosition` changes
+- When buffer changes, re-run the local `scheduleTask` for all direct dependents of this task and update them, then cascade from there
+- This ensures dependents instantly recalculate when contingency is added or removed
+
+**2. Expose `refreshSchedule` through the context** (`src/context/ProjectContext.tsx`)
+- Pass through the existing `refetch` (which is `fetchAll`) as `refreshSchedule` in the context value
+- This runs the full reconciliation loop that checks every dependent task and corrects any stale dates
+
+**3. Add a "Refresh Schedule" button** (`src/components/TableView.tsx`)
+- Add a small button (with a refresh icon) in the table toolbar area
+- Clicking it calls `refreshSchedule()` and shows a brief toast confirming the refresh
+- This gives users a manual fallback if automatic cascading misses an edge case
+
+### Technical Details
+
 **File: `src/hooks/useProjectData.ts`**
+- Line ~588: Change `datesChanged` to also include buffer changes:
+  ```text
+  const bufferChanged =
+    (updates.bufferDays !== undefined && updates.bufferDays !== oldTask.bufferDays) ||
+    (updates.bufferPosition !== undefined && updates.bufferPosition !== oldTask.bufferPosition);
+  const datesChanged = ... || bufferChanged;
+  ```
+- When `bufferChanged` is true but actual dates didn't change, compute the effective dates for the updated task and cascade from there using the RPC
 
-1. **Broaden the reconciliation loop** (line 384-402): Remove the `pred.subTasks.length === 0` guard so that ALL tasks with dependencies are checked and auto-corrected on every data fetch. The `getEffectiveDates` function already handles both leaf tasks (returns stored dates) and parent tasks (returns rolled-up dates), so this works correctly for all cases.
+**File: `src/context/ProjectContext.tsx`**
+- Add `refreshSchedule: () => Promise<void>` to the context type
+- Wire it to `fetchAll` from the hook (already returned as `refetch`)
 
-2. **Add DB fallback in updateTask**: When the predecessor is not found in the in-memory task tree during `updateTask`, query the database directly to get the predecessor's dates. This prevents stale closures from silently skipping the scheduling.
-
-### What Changes
-
-- Line 387: Change from `if (!pred || pred.subTasks.length === 0) continue;` to `if (!pred) continue;`
-- In the `updateTask` dependency scheduling block (~line 455): Add a fallback that queries the DB for the predecessor if it's not found in the in-memory tree, then schedules accordingly
-- Both changes ensure that setting a dependency on any task (top-level, parent, or sub-task) will always auto-calculate the dependent task's dates
+**File: `src/components/TableView.tsx`**
+- Import `RefreshCw` from lucide-react
+- Add a "Refresh Schedule" button next to existing toolbar actions
+- On click: call `refreshSchedule()`, show toast "Schedule refreshed"
 
 ### What Stays the Same
-- The `getEffectiveDates` utility (already handles both leaf and parent tasks)
 - The `scheduleTask` function (unchanged)
-- The cascade logic for sub-task date changes propagating to parent dependents
-- All other scheduling, timeline, and critical path calculations
+- The `getEffectiveDates` utility (unchanged)
+- The reconciliation loop in `fetchAll` (unchanged -- it already corrects stale dates on every fetch)
+- Realtime subscription triggers (unchanged)
+- All other task CRUD operations
+
