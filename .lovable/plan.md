@@ -1,94 +1,50 @@
 
 
-## Fix: Refresh Schedule Must Persist Corrected Dates
+## Timeline Zoom Controls
 
-### Root Cause
+### Overview
+Add zoom in/out controls to the Timeline view so you can adjust how much of the project timeline is visible at once. Currently the timeline auto-fits all tasks with 1-week padding on each side and uses a fixed `min-width: 1200px`. Zoom will work by scaling that minimum width -- zooming in stretches the timeline wider (more detail per day), zooming out compresses it (more days visible).
 
-The scheduling engine has two layers:
-1. **In-memory reconciliation** (runs on every `fetchAll`): correctly computes ASAP pull-forward and exclusion shifts, but deliberately does NOT write to the database ("to avoid feedback loop")
-2. **Cascade RPC** (runs on task save): reads dates from the database to propagate changes
+### How It Works
 
-The problem: these two layers are disconnected. The in-memory reconciliation correctly calculates that Ductwork Distribution should start May 5 (not May 13), but never persists that. So when the cascade RPC runs for downstream tasks, it reads the stale May 13 date from the database. This cascades through the chain:
+- A `zoomLevel` state (default 1.0) controls the horizontal scale
+- Zoom in: increases `zoomLevel` (e.g. 1.5x, 2x) making each day wider
+- Zoom out: decreases `zoomLevel` (e.g. 0.75x, 0.5x) compressing days
+- The `min-width` of the inner timeline container scales with `zoomLevel` (e.g. at 2x zoom, min-width becomes 2400px)
+- All percentage-based positioning (task bars, grid lines, today marker) continues to work unchanged since they're relative to the container width
+- A "Reset" button returns to 1.0x
 
-```text
-Ductwork Distribution: DB=May 13 (should be May 5)
-  -> New Electrical Distribution: DB=May 20 (should be ~May 9)
-    -> Dry-Wall: Phase 2: DB=May 29 (should be ~May 15)
+### UI
+
+Zoom controls will be added to the header area (next to the legend), as a small button group:
+
+```
+[ - ]  100%  [ + ]  [Reset]
 ```
 
-The `refreshSchedule` button just calls `fetchAll()` again, which re-runs the in-memory fix but still never saves it.
+- Minus button: zoom out (step down by 0.25, min 0.25)
+- Plus button: zoom in (step up by 0.25, max 4.0)
+- Percentage label shows current zoom
+- Reset button returns to 1.0
 
-### The Fix
-
-**File: `src/hooks/useProjectData.ts`**
-
-Create a dedicated `refreshSchedule` function that:
-1. Runs the same reconciliation logic as `fetchAll`
-2. Compares reconciled dates against the database dates
-3. Persists any corrected dates to the database
-4. Calls `cascade_task_dates` for each changed task so successors update
-5. Re-fetches to reflect the final state
-
-```text
-const refreshSchedule = useCallback(async () => {
-  if (!project || !projectId) return;
-
-  const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
-  const includeWeekends = project.includeWeekends;
-
-  // --- Pass 1: Dependency reconciliation (same logic as fetchAll) ---
-  for (const task of allTasks) {
-    // Compute latestStart from all predecessors (existing logic)
-    // If ASAP and task.startDate > latestStart, pull forward
-    // Apply constraint overrides
-    // Record original vs corrected dates
-  }
-
-  // --- Pass 2: Exclusion pass (same logic as fetchAll) ---
-  // Shift overlapping exclusion-linked tasks
-
-  // --- Pass 3: Persist changes ---
-  // For each task where dates changed:
-  //   1. UPDATE tasks SET start_date, end_date WHERE id = task.id
-  //   2. Call cascade_task_dates to propagate to successors
-
-  // --- Pass 4: Re-fetch ---
-  await fetchAll();
-}, [project, projectId, fetchAll]);
-```
-
-**File: `src/context/ProjectContext.tsx`**
-
-Update to use the new dedicated `refreshSchedule` function instead of just `refetch`.
+Optionally, Ctrl+Scroll (mouse wheel) on the timeline area can also adjust zoom for a more natural interaction.
 
 ### Technical Details
 
-The key difference from the current approach:
-- Current: `refreshSchedule` = `fetchAll()` = in-memory only
-- Fixed: `refreshSchedule` = reconcile + persist to DB + cascade + fetchAll
+**File: `src/components/TimelineView.tsx`**
 
-To avoid the feedback loop that the original design was concerned about:
-- The realtime subscription triggers `fetchAll()` (in-memory only, as before)
-- Only the explicit `refreshSchedule` action persists changes
-- This is safe because `refreshSchedule` is user-initiated (button click), not triggered by realtime events
+1. Add state: `const [zoomLevel, setZoomLevel] = useState(1)`
 
-The persist step will batch updates and cascades in dependency order (topological sort) so that upstream tasks are persisted before downstream tasks cascade from them.
+2. Add zoom handler functions:
+   - `zoomIn`: `setZoomLevel(prev => Math.min(prev + 0.25, 4))`
+   - `zoomOut`: `setZoomLevel(prev => Math.max(prev - 0.25, 0.25))`
+   - `resetZoom`: `setZoomLevel(1)`
 
-### What This Fixes
+3. Add `onWheel` handler to the scrollable container for Ctrl+Scroll zoom
 
-- Ductwork Distribution will be persisted at May 5 (pulled forward from May 13)
-- New Electrical Distribution will cascade to ~May 9 (instead of May 20)
-- Dry-Wall: Phase 2 will cascade to ~May 15 (instead of May 29)
-- All successor chains will reflect the correct dates in both the UI and database
+4. Update the inner container's `min-width` from the hardcoded `1200px` to `${1200 * zoomLevel}px`
+
+5. Add the zoom control buttons in the header between the title and legend sections, using the existing Button component from `@/components/ui/button` and `ZoomIn`, `ZoomOut`, `RotateCcw` icons from `lucide-react`
 
 ### Files Changed
-
-- `src/hooks/useProjectData.ts`: Add dedicated `refreshSchedule` function that persists reconciled dates and cascades
-- `src/context/ProjectContext.tsx`: Wire up the new `refreshSchedule` instead of `refetch`
-
-### What Stays the Same
-
-- The `fetchAll` in-memory reconciliation (unchanged, still runs on every data load)
-- Cascade RPC logic (unchanged)
-- TaskDialog, database schema, RLS policies (unchanged)
-- Realtime subscription behavior (unchanged)
+- `src/components/TimelineView.tsx`: Add zoom state, controls UI, wheel handler, and dynamic min-width
