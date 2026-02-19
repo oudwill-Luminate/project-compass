@@ -393,11 +393,18 @@ export function useProjectData(projectId: string | undefined) {
         task.dependencyType,
         includeWeekends
       );
-      if (scheduled.startDate !== task.startDate || scheduled.endDate !== task.endDate) {
-        // Update in DB silently — fetchAll will be triggered by realtime
+      // Only reconcile the START date; preserve the user's duration
+      if (scheduled.startDate !== task.startDate) {
+        const currentDuration = workingDaysDiff(
+          parseISO(task.startDate), parseISO(task.endDate), includeWeekends
+        );
+        const newEnd = format(
+          addWorkingDays(parseISO(scheduled.startDate), currentDuration, includeWeekends),
+          'yyyy-MM-dd'
+        );
         supabase.from('tasks').update({
           start_date: scheduled.startDate,
-          end_date: scheduled.endDate,
+          end_date: newEnd,
         }).eq('id', task.id).then(() => {});
       }
     }
