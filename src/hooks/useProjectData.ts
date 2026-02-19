@@ -672,9 +672,13 @@ export function useProjectData(projectId: string | undefined) {
           }
         }
         if (latestScheduled) {
-          // Only override dates if the task's current start actually violates the dependency
           const currentStart = updates.startDate || oldTask.startDate;
+          const taskConstraint = (updates.constraintType || oldTask.constraintType) as ScheduleConstraintType;
           if (currentStart < latestScheduled.startDate) {
+            // Task starts too early -- always shift forward
+            updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
+          } else if (taskConstraint === 'ASAP' && currentStart > latestScheduled.startDate) {
+            // ASAP task starts later than needed -- pull it forward
             updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
           }
         }
@@ -866,6 +870,17 @@ export function useProjectData(projectId: string | undefined) {
       }
     }
 
+    // When dependencies changed but dates weren't directly edited, still cascade
+    if (dependencyChanged && !datesChanged) {
+      const updatedStart = updates.startDate || oldTask.startDate;
+      const updatedEnd = updates.endDate || oldTask.endDate;
+      await supabase.rpc('cascade_task_dates', {
+        _task_id: taskId,
+        _new_start: updatedStart,
+        _new_end: updatedEnd,
+        _include_weekends: project.includeWeekends,
+      });
+    }
     // Refetch to sync all cascaded changes
     if (datesChanged || dependencyChanged) {
       fetchAll();
