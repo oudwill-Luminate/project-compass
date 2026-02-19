@@ -1,175 +1,150 @@
 
 
-## Support Multiple Dependencies per Task
+## Task Date Constraints (Manual Scheduling Override)
 
 ### Background (PM Best Practices)
 
-In standard project management (PMBOK, CPM methodology), a task can have **multiple predecessors**. For example, "Begin Testing" might depend on both "Development Complete" (FS) and "Test Environment Ready" (FS). Each dependency link has its own type (FS, FF, SS, SF). The dependent task's start is constrained by the **most restrictive** (latest) predecessor -- meaning the task cannot start until all its predecessors are satisfied.
+In PMBOK and standard scheduling tools (MS Project, Primavera P6), every task has a **constraint type** that controls how the scheduler treats its dates. Currently, all tasks behave as "As Soon As Possible" (ASAP) -- they start at the earliest date allowed by their dependencies. But in construction and trade-based projects, you often need to say things like:
 
-Currently, each task stores a single `depends_on` UUID and a single `dependency_type`. This limits scheduling to linear chains and prevents realistic network diagrams.
+- "The electricians can't come until March 15" (Start No Earlier Than)
+- "The inspection must happen on April 1" (Must Start On)
+- "We need framing done by March 20 at the latest" (Finish No Later Than)
 
-### Solution Overview
+These constraints work **alongside** dependencies -- the scheduler honors whichever is more restrictive.
 
-Introduce a **junction table** (`task_dependencies`) to store one row per dependency link, each with its own dependency type. Migrate existing single-dependency data into this table, then update all scheduling, cascading, critical path, and UI logic to work with arrays of dependencies.
+### Constraint Types
+
+The following constraint types will be supported:
+
+| Constraint | Meaning | Scheduler Behavior |
+|---|---|---|
+| **ASAP** (default) | As Soon As Possible | Start date is fully driven by dependencies |
+| **SNET** | Start No Earlier Than | Start date = max(dependency date, constraint date) |
+| **SNLT** | Start No Later Than | Start date = min(dependency date, constraint date) -- warns if conflict |
+| **MSO** | Must Start On | Start date is locked to the constraint date -- warns if dependency conflict |
+| **MFO** | Must Finish On | End date is locked; start is back-calculated from duration |
+| **FNET** | Finish No Earlier Than | End date = max(calculated end, constraint date) |
+| **FNLT** | Finish No Later Than | End date = min(calculated end, constraint date) -- warns if conflict |
+
+### How It Works
+
+When a task has a constraint:
+1. The dependency engine calculates the "ideal" start/end as usual
+2. The constraint is then applied on top:
+   - For "No Earlier Than" types: the task uses whichever date is **later** (dependency or constraint)
+   - For "No Later Than" types: the task uses whichever date is **earlier**, and a warning indicator appears if the constraint conflicts with a dependency
+   - For "Must" types: the constraint date wins unconditionally, with a conflict warning if dependencies disagree
+
+A small constraint icon and date will appear on constrained tasks in the Table and Timeline views so it's visually clear which tasks are manually pinned.
 
 ### What Changes
 
-**1. Database: New `task_dependencies` junction table**
-- Columns: `id` (PK), `task_id` (the dependent), `predecessor_id` (the predecessor), `dependency_type` (FS/FF/SS/SF), `created_at`
-- Foreign keys to `tasks` on both `task_id` and `predecessor_id`
-- Unique constraint on `(task_id, predecessor_id)` to prevent duplicates
-- RLS policies mirroring existing task policies (using `get_project_id_from_task`)
-- Migration step: copy existing `depends_on`/`dependency_type` data into the new table
-- Keep the old `depends_on` and `dependency_type` columns temporarily for safety (mark deprecated)
+**1. Database: Add constraint columns to `tasks` table**
+- `constraint_type` (enum: ASAP, SNET, SNLT, MSO, MFO, FNET, FNLT, default ASAP)
+- `constraint_date` (date, nullable -- only required when type is not ASAP)
 
-**2. Type changes (`src/types/project.ts`)**
-- Add a new interface:
-```text
-interface TaskDependency {
-  predecessorId: string;
-  type: DependencyType;
-}
-```
-- Add `dependencies: TaskDependency[]` to the `Task` interface
-- Keep `dependsOn` and `dependencyType` as deprecated (for backward compat during transition)
+**2. Types (`src/types/project.ts`)**
+- Add `ScheduleConstraint` type and config
+- Add `constraintType` and `constraintDate` fields to the `Task` interface
 
 **3. Data layer (`src/hooks/useProjectData.ts`)**
-- Fetch `task_dependencies` rows alongside tasks in `fetchAll`
-- Populate `task.dependencies` array from the junction table
-- Set `task.dependsOn` to the first dependency's predecessorId (backward compat)
-- **Reconciliation loop**: iterate over each dependency in `task.dependencies`, compute the scheduled start for each, then take the **latest** (most restrictive) start date
-- **Circular detection**: update to perform a full graph BFS/DFS through `dependencies` arrays (not just single `dependsOn` chain)
-- **updateTask**: when dependencies change, write to `task_dependencies` table (insert/delete rows) instead of updating `depends_on` column
-- **Cascade logic**: when dates/buffer change, the `cascade_task_dates` RPC needs updating (see below)
+- Map the new columns in `buildTaskTree`
+- Update the reconciliation loop to apply constraints after computing the dependency-based start:
+  - ASAP: no change (current behavior)
+  - SNET: `finalStart = max(dependencyStart, constraintDate)`
+  - MSO: `finalStart = constraintDate` (ignore dependency)
+  - MFO: `finalEnd = constraintDate`, back-calculate start from duration
+  - SNLT/FNET/FNLT: apply min/max logic accordingly
+- Preserve duration in all cases
+- Update `updateTask` to persist `constraint_type` and `constraint_date`
 
 **4. Cascade RPC (`cascade_task_dates`)**
-- Update the PostgreSQL function to look up predecessors from `task_dependencies` instead of the `depends_on` column
-- For each successor, find **all** its predecessors, compute the scheduled start from each, and take the latest (most restrictive) one
-- This ensures the cascade correctly handles tasks with multiple predecessors
+- Update the PostgreSQL function to read `constraint_type` and `constraint_date` for each successor
+- Apply the constraint logic server-side during cascading
 
-**5. Critical path (`src/lib/criticalPath.ts`)**
-- **Forward pass**: `getES` must consider all predecessors (max of all predecessor EFs + 1 day)
-- **Backward pass**: successor map built from all dependency links
-- Both passes naturally extend to multiple predecessors with minimal logic changes
+**5. Task Dialog UI (`src/components/TaskDialog.tsx`)**
+- Add a "Schedule Constraint" section with:
+  - A dropdown for constraint type (defaults to ASAP)
+  - A date picker for the constraint date (shown when type is not ASAP)
+  - A help tooltip explaining each constraint type
+- When ASAP is selected, the constraint date field is hidden
 
-**6. Task Dialog UI (`src/components/TaskDialog.tsx`)**
-- Replace the single "Depends On" dropdown with a **multi-dependency list**
-- Each dependency row shows: predecessor selector + dependency type selector + remove button
-- "Add Dependency" button to add another row
-- Circular dependency check runs against all proposed dependencies before saving
-- On save: compute the diff (added/removed dependencies) and write to `task_dependencies`
+**6. Task Row (`src/components/TaskRow.tsx`)**
+- Show a small pin/lock icon next to the date for constrained tasks
+- Tooltip shows the constraint type and date
+- If there's a conflict (constraint vs dependency), show a warning indicator
 
-**7. Task Row (`src/components/TaskRow.tsx`)**
-- Dependency link icon shows count when multiple dependencies exist (e.g., link icon with "3")
-- Tooltip lists all predecessor names
-
-**8. Timeline View (`src/components/TimelineView.tsx`)**
-- Dependency arrows render for each dependency link (not just one)
+**7. Timeline View (`src/components/TimelineView.tsx`)**
+- Constrained tasks get a small constraint marker (pin icon) on their bar
+- Conflict indicator if the constraint date conflicts with dependencies
 
 ### Technical Details
 
 **Migration SQL:**
 ```text
--- Create junction table
-CREATE TABLE task_dependencies (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  predecessor_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  dependency_type dependency_type NOT NULL DEFAULT 'FS',
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(task_id, predecessor_id),
-  CHECK(task_id != predecessor_id)
+-- Create constraint type enum
+CREATE TYPE schedule_constraint AS ENUM (
+  'ASAP', 'SNET', 'SNLT', 'MSO', 'MFO', 'FNET', 'FNLT'
 );
 
--- Enable RLS
-ALTER TABLE task_dependencies ENABLE ROW LEVEL SECURITY;
-
--- RLS policies
-CREATE POLICY "Members can view task dependencies"
-  ON task_dependencies FOR SELECT
-  USING (is_project_member(auth.uid(), get_project_id_from_task(task_id)));
-
-CREATE POLICY "Editors can insert task dependencies"
-  ON task_dependencies FOR INSERT
-  WITH CHECK (is_project_editor(auth.uid(), get_project_id_from_task(task_id)));
-
-CREATE POLICY "Editors can update task dependencies"
-  ON task_dependencies FOR UPDATE
-  USING (is_project_editor(auth.uid(), get_project_id_from_task(task_id)));
-
-CREATE POLICY "Editors can delete task dependencies"
-  ON task_dependencies FOR DELETE
-  USING (is_project_editor(auth.uid(), get_project_id_from_task(task_id)));
-
--- Migrate existing data
-INSERT INTO task_dependencies (task_id, predecessor_id, dependency_type)
-SELECT id, depends_on, dependency_type
-FROM tasks
-WHERE depends_on IS NOT NULL;
-
--- Enable realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE task_dependencies;
+-- Add columns to tasks
+ALTER TABLE tasks
+  ADD COLUMN constraint_type schedule_constraint NOT NULL DEFAULT 'ASAP',
+  ADD COLUMN constraint_date date;
 ```
 
-**Updated `cascade_task_dates` RPC (key change):**
+**Reconciliation logic change (pseudocode):**
 ```text
--- Instead of: SELECT ... FROM tasks WHERE depends_on = current_id
--- Use: SELECT td.task_id, td.dependency_type, t.start_date, t.end_date
---      FROM task_dependencies td
---      JOIN tasks t ON t.id = td.task_id
---      WHERE td.predecessor_id = current_id
--- For each successor, also check ALL its other predecessors
--- to pick the latest (most restrictive) start date
-```
+// After computing latestStart from dependencies...
+let finalStart = latestStart || task.startDate;
+let finalEnd = task.endDate;
 
-**Reconciliation loop change:**
-```text
-for (const task of allTasksFlat) {
-  if (task.dependencies.length === 0) continue;
-  // Compute scheduled start from EACH predecessor
-  let latestStart = null;
-  for (const dep of task.dependencies) {
-    const pred = allTasksFlat.find(t => t.id === dep.predecessorId);
-    if (!pred) continue;
-    const eff = getEffectiveDates(pred);
-    const scheduled = scheduleTask(..., dep.type, ...);
-    if (!latestStart || scheduled.startDate > latestStart) {
-      latestStart = scheduled.startDate;
-    }
-  }
-  // Only update if latestStart differs, preserving duration
+switch (task.constraintType) {
+  case 'SNET':
+    if (task.constraintDate > finalStart) finalStart = task.constraintDate;
+    // Recalculate end from duration
+    break;
+  case 'MSO':
+    finalStart = task.constraintDate; // Override dependency
+    break;
+  case 'MFO':
+    finalEnd = task.constraintDate;
+    // Back-calculate start from duration
+    break;
+  case 'FNET':
+    if (task.constraintDate > calculatedEnd) finalEnd = task.constraintDate;
+    break;
+  // ... etc
 }
 ```
 
-**Critical path forward pass change:**
+**Cascade RPC update (key addition):**
 ```text
-const getES = (id) => {
-  const t = taskMap.get(id);
-  if (t.dependencies.length === 0) return parseISO(t.startDate);
-  // ES = max of all predecessor EFs + 1 day
-  const earliest = Math.max(
-    ...t.dependencies.map(d => getEF(d.predecessorId) + DAY_MS)
-  );
-  return earliest;
-};
+-- After computing dependency-based new_s and new_e for a successor:
+SELECT constraint_type, constraint_date INTO v_ct, v_cd FROM tasks WHERE id = succ_id;
+IF v_ct = 'SNET' AND v_cd > new_s THEN
+  new_s := v_cd;
+  new_e := new_s + duration;
+ELSIF v_ct = 'MSO' THEN
+  new_s := v_cd;
+  new_e := new_s + duration;
+-- ... other constraint types
+END IF;
 ```
 
 ### Files Changed
-- **1 migration file**: new `task_dependencies` table + data migration + updated `cascade_task_dates` RPC
-- `src/types/project.ts`: add `TaskDependency` interface and `dependencies` array
-- `src/hooks/useProjectData.ts`: fetch dependencies, reconciliation, circular detection, cascade, CRUD
-- `src/lib/criticalPath.ts`: multi-predecessor forward/backward pass
-- `src/components/TaskDialog.tsx`: multi-dependency UI
-- `src/components/TaskRow.tsx`: dependency count display
-- `src/components/TimelineView.tsx`: multiple dependency arrows
-- `src/context/ProjectContext.tsx`: minor type updates if needed
-- `src/data/mockData.ts`: add `dependencies` field to mock data
+- **1 migration file**: add `schedule_constraint` enum + columns + updated `cascade_task_dates` RPC
+- `src/types/project.ts`: add constraint types and fields
+- `src/hooks/useProjectData.ts`: mapping, reconciliation with constraints, updateTask
+- `src/components/TaskDialog.tsx`: constraint UI (dropdown + date picker)
+- `src/components/TaskRow.tsx`: constraint indicator icon
+- `src/components/TimelineView.tsx`: constraint marker on bars
+- `src/data/mockData.ts`: add default constraint fields
 
 ### What Stays the Same
+- Dependency logic (unchanged -- constraints layer on top)
 - Buffer logic (unchanged)
 - Milestone logic (unchanged)
-- Sub-task hierarchy and roll-up (unchanged)
-- Bucket CRUD (unchanged)
-- Activity logging (unchanged)
-- RLS on all other tables (unchanged)
-
+- Critical path calculation (unchanged -- constraints just affect the dates fed into it)
+- Resource leveling (unchanged)
+- All RLS policies on existing tables (unchanged)
