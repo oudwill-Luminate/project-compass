@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
-import { CalendarIcon, AlertTriangle, Info, Diamond } from 'lucide-react';
+import { CalendarIcon, AlertTriangle, Info, Diamond, Plus, X } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { TaskChecklist, ChecklistItem } from '@/components/TaskChecklist';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { Task, TaskStatus, TaskPriority, DependencyType, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
+import { Task, TaskStatus, TaskPriority, DependencyType, TaskDependency, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
 import {
@@ -119,12 +119,20 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
       }
     }
 
+    // Filter out empty dependency rows
+    const cleanDeps = (formData.dependencies || []).filter(d => d.predecessorId);
+    const cleanedFormData = {
+      ...formData,
+      dependencies: cleanDeps,
+      dependsOn: cleanDeps.length > 0 ? cleanDeps[0].predecessorId : null,
+      dependencyType: cleanDeps.length > 0 ? cleanDeps[0].type : 'FS' as DependencyType,
+    };
+
     if (isNew && onCreateSave) {
-      const { id, subTasks, ...rest } = formData;
-      // For new tasks, we'll need to save checklist items after the task is created
+      const { id, subTasks, ...rest } = cleanedFormData;
       onCreateSave(rest);
     } else {
-      updateTask(task.id, formData);
+      updateTask(task.id, cleanedFormData);
     }
     onOpenChange(false);
   };
@@ -426,61 +434,105 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
           </div>
 
           {/* Dependencies */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs font-medium">Depends On</Label>
-              <Select
-                value={formData.dependsOn || 'none'}
-                onValueChange={v => {
-                  const newDep = v === 'none' ? null : v;
-                  if (newDep) {
-                    // Circular dependency detection with path
-                    const allTasks = getAllTasks();
-                    const chain: string[] = [task.id];
-                    const visited = new Set<string>([task.id]);
-                    let current: string | null = newDep;
-                    let circular = false;
-                    while (current) {
-                      chain.push(current);
-                      if (current === task.id) { circular = true; break; }
-                      if (visited.has(current)) break;
-                      visited.add(current);
-                      const t = allTasks.find(t => t.id === current);
-                      current = t?.dependsOn || null;
-                    }
-                    if (circular) {
-                      const names = chain.map(id => allTasks.find(t => t.id === id)?.title || 'Unknown').join(' → ');
-                      toast({ title: 'Circular Dependency', description: names, variant: 'destructive' });
-                      return;
-                    }
-                  }
-                  setFormData({ ...formData, dependsOn: newDep });
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">Dependencies</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs gap-1"
+                onClick={() => {
+                  setFormData(prev => ({
+                    ...prev,
+                    dependencies: [...(prev.dependencies || []), { predecessorId: '', type: 'FS' as DependencyType }],
+                  }));
                 }}
               >
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  <SelectItem value="none">None</SelectItem>
-                  {otherTasks.map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <Plus className="w-3 h-3" /> Add
+              </Button>
             </div>
-            <div>
-              <Label className="text-xs font-medium">Dependency Type</Label>
-              <Select
-                value={formData.dependencyType}
-                onValueChange={(v: DependencyType) => setFormData({ ...formData, dependencyType: v })}
-                disabled={!formData.dependsOn}
-              >
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  {Object.entries(DEPENDENCY_LABELS).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {(formData.dependencies || []).length === 0 && (
+              <p className="text-xs text-muted-foreground">No dependencies. Click "Add" to link a predecessor.</p>
+            )}
+            {(formData.dependencies || []).map((dep, idx) => (
+              <div key={idx} className="grid grid-cols-[1fr_140px_28px] gap-2 items-center">
+                <Select
+                  value={dep.predecessorId || 'none'}
+                  onValueChange={v => {
+                    const newPredId = v === 'none' ? '' : v;
+                    if (newPredId) {
+                      // Quick circular check
+                      const allTasks = getAllTasks();
+                      const visited = new Set<string>([task.id]);
+                      let current: string | null = newPredId;
+                      let circular = false;
+                      while (current) {
+                        if (current === task.id) { circular = true; break; }
+                        if (visited.has(current)) break;
+                        visited.add(current);
+                        const t = allTasks.find(t => t.id === current);
+                        if (!t) break;
+                        const tDeps = t.dependencies?.length > 0 ? t.dependencies : (t.dependsOn ? [{ predecessorId: t.dependsOn, type: t.dependencyType }] : []);
+                        // Check all predecessors of this task
+                        current = null;
+                        for (const d of tDeps) {
+                          if (d.predecessorId === task.id) { circular = true; break; }
+                        }
+                        if (circular) break;
+                        current = tDeps.length > 0 ? tDeps[0].predecessorId : null;
+                      }
+                      if (circular) {
+                        toast({ title: 'Circular Dependency', description: 'This would create a cycle', variant: 'destructive' });
+                        return;
+                      }
+                    }
+                    setFormData(prev => ({
+                      ...prev,
+                      dependencies: prev.dependencies.map((d, i) => i === idx ? { ...d, predecessorId: newPredId } : d),
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="text-xs h-8"><SelectValue placeholder="Select task..." /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="none">None</SelectItem>
+                    {otherTasks
+                      .filter(t => !(formData.dependencies || []).some((d, i) => i !== idx && d.predecessorId === t.id))
+                      .map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={dep.type}
+                  onValueChange={(v: DependencyType) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      dependencies: prev.dependencies.map((d, i) => i === idx ? { ...d, type: v } : d),
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    {Object.entries(DEPENDENCY_LABELS).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={() => {
+                    setFormData(prev => ({
+                      ...prev,
+                      dependencies: prev.dependencies.filter((_, i) => i !== idx),
+                    }));
+                  }}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
           </div>
 
           {/* Contingency Buffer - hidden for parent tasks */}

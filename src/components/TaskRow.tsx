@@ -106,6 +106,7 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
 
   const statusConfig = STATUS_CONFIG[rolled.status];
   const priorityConfig = PRIORITY_CONFIG[task.priority];
+  const depCount = (task.dependencies?.length || 0) || (task.dependsOn ? 1 : 0);
   const dependsOnTask = task.dependsOn ? getTaskById(task.dependsOn) : null;
 
   const show = (id: string) => (visibleColumnIds ?? []).includes(id);
@@ -179,9 +180,20 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
             ({task.subTasks.length})
           </span>
         )}
-        {task.dependsOn && (
-          <span className="text-muted-foreground shrink-0" title={`Depends on: ${dependsOnTask?.title || task.dependsOn}`}>
+        {depCount > 0 && (
+          <span
+            className="text-muted-foreground shrink-0 inline-flex items-center gap-0.5"
+            title={
+              (task.dependencies?.length > 0
+                ? task.dependencies.map(d => {
+                    const pred = getTaskById(d.predecessorId);
+                    return `${pred?.title || d.predecessorId} (${d.type})`;
+                  }).join(', ')
+                : dependsOnTask?.title || task.dependsOn || '')
+            }
+          >
             <Link className="w-3 h-3" />
+            {depCount > 1 && <span className="text-[10px] font-medium">{depCount}</span>}
           </span>
         )}
         {task.flaggedAsRisk && !isHighRisk && (

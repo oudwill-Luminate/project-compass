@@ -2,6 +2,11 @@ export type TaskStatus = 'done' | 'working' | 'stuck' | 'not-started';
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 export type DependencyType = 'FS' | 'FF' | 'SS' | 'SF';
 
+export interface TaskDependency {
+  predecessorId: string;
+  type: DependencyType;
+}
+
 export interface Owner {
   id: string;
   name: string;
@@ -18,8 +23,11 @@ export interface Task {
   endDate: string; // YYYY-MM-DD
   estimatedCost: number;
   actualCost: number;
+  /** @deprecated Use dependencies array instead */
   dependsOn: string | null;
+  /** @deprecated Use dependencies array instead */
   dependencyType: DependencyType;
+  dependencies: TaskDependency[];
   flaggedAsRisk: boolean;
   riskImpact: number; // 1-5
   riskProbability: number; // 1-5
