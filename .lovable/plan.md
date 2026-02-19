@@ -1,91 +1,88 @@
 
 
-## Fix: Tasks Not Automatically Pulled Forward (ASAP Scheduling)
+## Fix: Tasks Not Rescheduling When Dependencies Are Added
 
-### The Problem
+### Root Cause
 
-The in-memory reconciliation loop (which runs after every data fetch) only pushes tasks **later** when they violate a dependency. It never pulls tasks **earlier** when slack exists. Specifically, the condition at line 470:
+When you add "Trim Install" as a dependency of "Painting - Interior", two things go wrong:
 
-```text
-if (latestStart && task.startDate < latestStart)
-```
+1. **The date adjustment only pushes tasks later, never earlier**: At line 677, the code checks `if (currentStart < latestScheduled.startDate)` -- meaning it only moves a task if it starts *before* the dependency allows. "Painting - Interior" starts *after* its predecessor's end, so the condition is false and the dates are left unchanged.
 
-This says: "only move a task if it starts too early." For Ductwork Distribution (ASAP constraint, starting May 13 when it could start May 5), the reconciliation sees May 13 is *after* the earliest allowed start, so it does nothing.
+2. **The cascade RPC is never called**: Because the dates didn't change (bug #1), the `datesChanged` flag remains false, so the cascade engine at line 822-830 is skipped entirely. The task's database dates are never updated.
 
-For tasks with `constraintType = 'ASAP'`, the correct behavior is: start as soon as all predecessors allow -- meaning the task should be **pulled forward** to `latestStart` whenever `task.startDate > latestStart`.
-
-Additionally, the exclusion pass (line 532) doesn't account for buffers on the earlier task, so it may place a task too early after an exclusion-linked task with an end buffer.
+In summary: adding a dependency currently does nothing to pull an ASAP task forward to its correct earliest start.
 
 ### The Fix
 
 **File: `src/hooks/useProjectData.ts`**
 
-1. **Pull ASAP tasks forward** (lines 467-476): Change the reconciliation condition so that ASAP tasks are moved to their earliest possible start, not just prevented from starting too early:
+**Change 1 -- Pull ASAP tasks forward when dependency is added (around line 674-681)**
+
+Update the dependency scheduling block to also pull ASAP tasks forward when they start later than their dependencies require:
 
 ```text
-// BEFORE: only shifts tasks that start too early
-if (latestStart && task.startDate < latestStart) { ... }
+// BEFORE (line 676-679):
+const currentStart = updates.startDate || oldTask.startDate;
+if (currentStart < latestScheduled.startDate) {
+  updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
+}
 
-// AFTER: for ASAP tasks, also pull forward if starting later than needed
-if (latestStart) {
-  const shouldShift =
-    task.startDate < latestStart ||  // too early (existing logic)
-    (task.constraintType === 'ASAP' && task.startDate > latestStart);  // too late
-  if (shouldShift) {
-    finalStart = latestStart;
-    finalEnd = format(
-      addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
-      'yyyy-MM-dd'
-    );
-  }
+// AFTER:
+const currentStart = updates.startDate || oldTask.startDate;
+const taskConstraint = (updates.constraintType || oldTask.constraintType) as ScheduleConstraintType;
+if (currentStart < latestScheduled.startDate) {
+  // Task starts too early -- always shift forward
+  updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
+} else if (taskConstraint === 'ASAP' && currentStart > latestScheduled.startDate) {
+  // ASAP task starts later than needed -- pull it forward
+  updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
 }
 ```
 
-This ensures ASAP-constrained tasks always snap to their earliest possible start based on predecessors.
+**Change 2 -- Trigger cascade when dependencies change (around line 868-872)**
 
-2. **Buffer-aware exclusion pass** (line 532): When computing the new start for the later task, use the earlier task's effective end (including buffer) instead of raw end date:
-
-```text
-// BEFORE:
-const newStart = nextWorkingDay(addDays(parseISO(earlierTask.endDate), 1), includeWeekends);
-
-// AFTER: account for buffer on the earlier task
-const earlierEffEnd = earlierTask.bufferDays > 0 && earlierTask.bufferPosition === 'end'
-  ? addWorkingDays(parseISO(earlierTask.endDate), earlierTask.bufferDays, includeWeekends)
-  : parseISO(earlierTask.endDate);
-const newStart = nextWorkingDay(addDays(earlierEffEnd, 1), includeWeekends);
-```
-
-3. **Buffer-aware overlap check** (line 527): Also factor buffer into the overlap detection:
+When only dependencies change (but not dates directly), we still need to call the cascade RPC so that the new dates propagate to successor tasks:
 
 ```text
-// BEFORE:
-if (task.startDate <= linked.endDate && task.endDate >= linked.startDate)
+// BEFORE (line 870):
+if (datesChanged || dependencyChanged) {
+  fetchAll();
+}
 
-// AFTER: use effective end dates for overlap check
-const taskEffEnd = task.bufferDays > 0 && task.bufferPosition === 'end'
-  ? format(addWorkingDays(parseISO(task.endDate), task.bufferDays, includeWeekends), 'yyyy-MM-dd')
-  : task.endDate;
-const linkedEffEnd = linked.bufferDays > 0 && linked.bufferPosition === 'end'
-  ? format(addWorkingDays(parseISO(linked.endDate), linked.bufferDays, includeWeekends), 'yyyy-MM-dd')
-  : linked.endDate;
-if (task.startDate <= linkedEffEnd && taskEffEnd >= linked.startDate)
+// AFTER:
+if (dependencyChanged && !datesChanged) {
+  // Dependencies changed but updateTask scheduling already set new dates above.
+  // Call cascade to propagate to successors.
+  const updatedStart = updates.startDate || oldTask.startDate;
+  const updatedEnd = updates.endDate || oldTask.endDate;
+  await supabase.rpc('cascade_task_dates', {
+    _task_id: taskId,
+    _new_start: updatedStart,
+    _new_end: updatedEnd,
+    _include_weekends: project.includeWeekends,
+  });
+}
+if (datesChanged || dependencyChanged) {
+  fetchAll();
+}
 ```
 
-### Why This Works
+### Why This Fixes the Problem
 
-- The cascade RPC handles authoritative date changes in the database (dependency chains, exclusions, constraints)
-- The in-memory reconciliation is a "safety net" that corrects dates on fetch -- currently it only enforces "don't start too early" but not "start as soon as possible"
-- By adding the forward-pull for ASAP tasks, Ductwork Distribution will snap to May 5 (right after Fire Suppression's effective end) on every data refresh
-- Buffer-aware exclusion checks prevent tasks from overlapping with buffer zones
+- When you add "Trim Install" as a dependency of "Painting - Interior":
+  - The scheduling block computes the earliest start after Trim Install
+  - Since Painting has ASAP constraint and starts later than needed, it gets pulled forward
+  - The updated dates are written to the database
+  - The cascade RPC is called so any tasks depending on Painting also get rescheduled
+  - `fetchAll()` refreshes the UI with the corrected dates
 
 ### Files Changed
 
-- `src/hooks/useProjectData.ts`: Update reconciliation condition and exclusion pass
+- `src/hooks/useProjectData.ts`: Fix dependency scheduling condition and ensure cascade runs on dependency changes
 
 ### What Stays the Same
 
-- Cascade RPC (already updated with buffer-aware exclusions)
+- Cascade RPC (unchanged)
+- In-memory reconciliation in fetchAll (already has ASAP pull-forward -- this fix ensures it also works at save time)
 - TaskDialog (unchanged)
 - Database schema and RLS policies (unchanged)
-- Non-ASAP constraint handling (SNET, MSO, etc. unchanged)
