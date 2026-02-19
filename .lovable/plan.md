@@ -1,62 +1,84 @@
 
 
-## Instant Schedule Refresh on Buffer/Date Changes + Manual Refresh Button
+## Add Milestone Support to Tasks
 
-### Problem
-When you change the contingency (buffer days) on a task like "Construction of New Interior Walls," its dependent task "Dry-Wall: Phase 1" does not automatically update its start date. This is because the cascade logic only triggers when `startDate` or `endDate` explicitly change -- it ignores changes to `bufferDays` or `bufferPosition`, even though those affect the effective dates used by dependents.
+### What Are Milestones?
 
-Additionally, there is no manual fallback to force a schedule refresh.
+In project management (per PMI/PMBOK best practices), a **milestone** is a zero-duration checkpoint that marks a significant event -- such as a phase completion, approval gate, deliverable handoff, or go/no-go decision. Milestones differ from regular tasks in that they:
 
-### Root Cause
-In `useProjectData.ts` (line 588-590), the `datesChanged` check only looks at `startDate` and `endDate`:
-```text
-const datesChanged =
-  (updates.startDate && updates.startDate !== oldTask.startDate) ||
-  (updates.endDate && updates.endDate !== oldTask.endDate);
-```
-When `bufferDays` changes from 5 to 0, the task's own dates don't change, so the cascade never fires and dependents keep their old dates.
+- Have **zero duration** (start date = end date)
+- Represent a **point in time**, not a span of work
+- Are often used as **dependency anchors** for downstream work
+- Are visually distinguished (traditionally shown as a **diamond** shape on Gantt charts)
+- Can still have an owner, status, and dependencies
 
-### Solution
+### What Changes
 
-**1. Trigger cascade on buffer changes** (`src/hooks/useProjectData.ts`)
-- Expand the `datesChanged` condition to also detect `bufferDays` or `bufferPosition` changes
-- When buffer changes, re-run the local `scheduleTask` for all direct dependents of this task and update them, then cascade from there
-- This ensures dependents instantly recalculate when contingency is added or removed
+**1. Database: Add `is_milestone` column to tasks table**
+- New boolean column `is_milestone` (default `false`) on the `tasks` table
+- No RLS changes needed -- existing task policies cover it
 
-**2. Expose `refreshSchedule` through the context** (`src/context/ProjectContext.tsx`)
-- Pass through the existing `refetch` (which is `fetchAll`) as `refreshSchedule` in the context value
-- This runs the full reconciliation loop that checks every dependent task and corrects any stale dates
+**2. Type Definition** (`src/types/project.ts`)
+- Add `isMilestone: boolean` to the `Task` interface
 
-**3. Add a "Refresh Schedule" button** (`src/components/TableView.tsx`)
-- Add a small button (with a refresh icon) in the table toolbar area
-- Clicking it calls `refreshSchedule()` and shows a brief toast confirming the refresh
-- This gives users a manual fallback if automatic cascading misses an edge case
+**3. Data Mapping** (`src/hooks/useProjectData.ts`)
+- Map `is_milestone` from the database to `isMilestone` in the Task type
+- When creating or updating tasks, persist the flag
+- When `isMilestone` is toggled ON, automatically set `endDate = startDate` (zero duration)
+
+**4. Task Dialog** (`src/components/TaskDialog.tsx`)
+- Add a "Mark as Milestone" toggle switch near the top of the form (below Title)
+- When toggled ON:
+  - Lock duration to 0 (hide end date picker and duration field)
+  - Auto-set `endDate = startDate`
+  - Show a small informational note: "Milestones are zero-duration checkpoints"
+- When toggled OFF: restore normal date editing
+
+**5. Table View -- Task Row** (`src/components/TaskRow.tsx`)
+- Show a small diamond icon next to the task title for milestone tasks
+- Dates column shows a single date instead of start/end range
+
+**6. Timeline View** (`src/components/TimelineView.tsx`)
+- Render milestones as a **diamond shape** instead of a horizontal bar
+- Position the diamond at the milestone's date on the timeline
+- Add a diamond to the legend
+
+**7. Task Row Context Menu** (`src/components/TaskRow.tsx`)
+- Add "Toggle Milestone" option in the dropdown menu (next to "Flag as Risk")
+- Quick way to mark/unmark without opening the full dialog
 
 ### Technical Details
 
-**File: `src/hooks/useProjectData.ts`**
-- Line ~588: Change `datesChanged` to also include buffer changes:
-  ```text
-  const bufferChanged =
-    (updates.bufferDays !== undefined && updates.bufferDays !== oldTask.bufferDays) ||
-    (updates.bufferPosition !== undefined && updates.bufferPosition !== oldTask.bufferPosition);
-  const datesChanged = ... || bufferChanged;
-  ```
-- When `bufferChanged` is true but actual dates didn't change, compute the effective dates for the updated task and cascade from there using the RPC
+**Migration SQL:**
+```text
+ALTER TABLE tasks ADD COLUMN is_milestone boolean NOT NULL DEFAULT false;
+```
 
-**File: `src/context/ProjectContext.tsx`**
-- Add `refreshSchedule: () => Promise<void>` to the context type
-- Wire it to `fetchAll` from the hook (already returned as `refetch`)
+**Type change (`src/types/project.ts`):**
+- Add `isMilestone: boolean` after `bufferPosition`
 
-**File: `src/components/TableView.tsx`**
-- Import `RefreshCw` from lucide-react
-- Add a "Refresh Schedule" button next to existing toolbar actions
-- On click: call `refreshSchedule()`, show toast "Schedule refreshed"
+**Hook mapping (`src/hooks/useProjectData.ts`):**
+- In `mapTask`: add `isMilestone: row.is_milestone || false`
+- In `updateTask` DB update: map `isMilestone` to `is_milestone`
+- In `addTask` / `createTaskFull`: include `is_milestone: false` by default
+
+**TaskDialog (`src/components/TaskDialog.tsx`):**
+- Add Switch component for milestone toggle below the Title field
+- When `isMilestone` is true, hide end date and duration, auto-sync `endDate = startDate`
+
+**TaskRow (`src/components/TaskRow.tsx`):**
+- Import `Diamond` from lucide-react
+- Show diamond icon in the task name cell when `task.isMilestone`
+- In the dropdown menu, add "Mark as Milestone" / "Remove Milestone" toggle
+
+**TimelineView (`src/components/TimelineView.tsx`):**
+- When `task.isMilestone`, render a rotated square (diamond) instead of a bar
+- Diamond positioned at the task's date, sized ~14x14px, rotated 45 degrees
+- Add diamond entry to the legend section
 
 ### What Stays the Same
-- The `scheduleTask` function (unchanged)
-- The `getEffectiveDates` utility (unchanged)
-- The reconciliation loop in `fetchAll` (unchanged -- it already corrects stale dates on every fetch)
-- Realtime subscription triggers (unchanged)
-- All other task CRUD operations
+- All scheduling and cascade logic (milestones have start = end, so cascading works naturally)
+- Critical path computation (milestones are included as zero-duration tasks)
+- Cost and effort tracking (milestones can still carry costs if needed)
+- Sub-task hierarchy (milestones should be leaf tasks only -- if a task has sub-tasks, the milestone toggle is hidden)
 
