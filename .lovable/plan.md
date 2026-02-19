@@ -1,85 +1,175 @@
 
 
-## Fix: Duration Reverting After Edit on Dependent Tasks
+## Support Multiple Dependencies per Task
 
-### Problem
-When you change the duration of a task that depends on another task (like 'New Electrical Distribution'), the new duration is saved to the database but immediately overwritten. The reconciliation loop in `fetchAll()` recalculates dates for **every** dependent task on **every** data fetch, regardless of whether the predecessor actually changed. This silently reverts your manual edits.
+### Background (PM Best Practices)
 
-### Root Cause
-In `src/hooks/useProjectData.ts`, lines 385-403, the reconciliation loop runs inside `fetchAll()`:
+In standard project management (PMBOK, CPM methodology), a task can have **multiple predecessors**. For example, "Begin Testing" might depend on both "Development Complete" (FS) and "Test Environment Ready" (FS). Each dependency link has its own type (FS, FF, SS, SF). The dependent task's start is constrained by the **most restrictive** (latest) predecessor -- meaning the task cannot start until all its predecessors are satisfied.
 
-```text
-for (const task of allTasksFlat) {
-  if (!task.dependsOn) continue;
-  const pred = ...;
-  const scheduled = scheduleTask(pred, task, ...);
-  if (scheduled !== task dates) {
-    // Overwrites the task's dates in DB
-  }
-}
-```
+Currently, each task stores a single `depends_on` UUID and a single `dependency_type`. This limits scheduling to linear chains and prevents realistic network diagrams.
 
-This loop fires every time data is fetched -- after saves, after realtime events, on initial load. It doesn't know whether the mismatch is because:
-- (A) The predecessor moved and the dependent needs updating, OR
-- (B) The user intentionally changed this task's duration/dates
+### Solution Overview
 
-It always assumes (A) and overwrites.
-
-### Solution
-The reconciliation loop should only force-recalculate a dependent task's **start date** based on its predecessor, while **preserving the task's own duration**. This way:
-- If a predecessor moves, the dependent shifts to maintain the correct start relative to the predecessor
-- If a user changes the duration, the new duration is preserved because only the start date is locked to the predecessor
-
-### Technical Changes
-
-**File: `src/hooks/useProjectData.ts` (reconciliation loop, lines 385-403)**
-
-Replace the current logic that overwrites both start and end dates with logic that:
-
-1. Computes the correct **start date only** based on the predecessor (using the dependency type)
-2. Preserves the task's **existing duration** (difference between its current start and end)
-3. Only writes to the DB if the start date actually needs to move
-
-```text
-for (const task of allTasksFlat) {
-  if (!task.dependsOn) continue;
-  const pred = allTasksFlat.find(t => t.id === task.dependsOn);
-  if (!pred) continue;
-  const eff = getEffectiveDates(pred);
-  const scheduled = scheduleTask(
-    { ...pred, startDate: eff.startDate, endDate: eff.endDate },
-    task,
-    task.dependencyType,
-    includeWeekends
-  );
-  // Only reconcile the START date; preserve the user's duration
-  if (scheduled.startDate !== task.startDate) {
-    const currentDuration = workingDaysDiff(
-      parseISO(task.startDate), parseISO(task.endDate), includeWeekends
-    );
-    const newEnd = format(
-      addWorkingDays(parseISO(scheduled.startDate), currentDuration, includeWeekends),
-      'yyyy-MM-dd'
-    );
-    supabase.from('tasks').update({
-      start_date: scheduled.startDate,
-      end_date: newEnd,
-    }).eq('id', task.id).then(() => {});
-  }
-}
-```
-
-This ensures:
-- Predecessor changes still cascade correctly (dependent's start shifts)
-- User edits to duration are never silently overwritten
-- The "Refresh Schedule" button still works as a manual fallback since it calls `fetchAll()`
+Introduce a **junction table** (`task_dependencies`) to store one row per dependency link, each with its own dependency type. Migrate existing single-dependency data into this table, then update all scheduling, cascading, critical path, and UI logic to work with arrays of dependencies.
 
 ### What Changes
-- **1 file**: `src/hooks/useProjectData.ts` -- reconciliation loop only (approx. lines 385-403)
+
+**1. Database: New `task_dependencies` junction table**
+- Columns: `id` (PK), `task_id` (the dependent), `predecessor_id` (the predecessor), `dependency_type` (FS/FF/SS/SF), `created_at`
+- Foreign keys to `tasks` on both `task_id` and `predecessor_id`
+- Unique constraint on `(task_id, predecessor_id)` to prevent duplicates
+- RLS policies mirroring existing task policies (using `get_project_id_from_task`)
+- Migration step: copy existing `depends_on`/`dependency_type` data into the new table
+- Keep the old `depends_on` and `dependency_type` columns temporarily for safety (mark deprecated)
+
+**2. Type changes (`src/types/project.ts`)**
+- Add a new interface:
+```text
+interface TaskDependency {
+  predecessorId: string;
+  type: DependencyType;
+}
+```
+- Add `dependencies: TaskDependency[]` to the `Task` interface
+- Keep `dependsOn` and `dependencyType` as deprecated (for backward compat during transition)
+
+**3. Data layer (`src/hooks/useProjectData.ts`)**
+- Fetch `task_dependencies` rows alongside tasks in `fetchAll`
+- Populate `task.dependencies` array from the junction table
+- Set `task.dependsOn` to the first dependency's predecessorId (backward compat)
+- **Reconciliation loop**: iterate over each dependency in `task.dependencies`, compute the scheduled start for each, then take the **latest** (most restrictive) start date
+- **Circular detection**: update to perform a full graph BFS/DFS through `dependencies` arrays (not just single `dependsOn` chain)
+- **updateTask**: when dependencies change, write to `task_dependencies` table (insert/delete rows) instead of updating `depends_on` column
+- **Cascade logic**: when dates/buffer change, the `cascade_task_dates` RPC needs updating (see below)
+
+**4. Cascade RPC (`cascade_task_dates`)**
+- Update the PostgreSQL function to look up predecessors from `task_dependencies` instead of the `depends_on` column
+- For each successor, find **all** its predecessors, compute the scheduled start from each, and take the latest (most restrictive) one
+- This ensures the cascade correctly handles tasks with multiple predecessors
+
+**5. Critical path (`src/lib/criticalPath.ts`)**
+- **Forward pass**: `getES` must consider all predecessors (max of all predecessor EFs + 1 day)
+- **Backward pass**: successor map built from all dependency links
+- Both passes naturally extend to multiple predecessors with minimal logic changes
+
+**6. Task Dialog UI (`src/components/TaskDialog.tsx`)**
+- Replace the single "Depends On" dropdown with a **multi-dependency list**
+- Each dependency row shows: predecessor selector + dependency type selector + remove button
+- "Add Dependency" button to add another row
+- Circular dependency check runs against all proposed dependencies before saving
+- On save: compute the diff (added/removed dependencies) and write to `task_dependencies`
+
+**7. Task Row (`src/components/TaskRow.tsx`)**
+- Dependency link icon shows count when multiple dependencies exist (e.g., link icon with "3")
+- Tooltip lists all predecessor names
+
+**8. Timeline View (`src/components/TimelineView.tsx`)**
+- Dependency arrows render for each dependency link (not just one)
+
+### Technical Details
+
+**Migration SQL:**
+```text
+-- Create junction table
+CREATE TABLE task_dependencies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  predecessor_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  dependency_type dependency_type NOT NULL DEFAULT 'FS',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(task_id, predecessor_id),
+  CHECK(task_id != predecessor_id)
+);
+
+-- Enable RLS
+ALTER TABLE task_dependencies ENABLE ROW LEVEL SECURITY;
+
+-- RLS policies
+CREATE POLICY "Members can view task dependencies"
+  ON task_dependencies FOR SELECT
+  USING (is_project_member(auth.uid(), get_project_id_from_task(task_id)));
+
+CREATE POLICY "Editors can insert task dependencies"
+  ON task_dependencies FOR INSERT
+  WITH CHECK (is_project_editor(auth.uid(), get_project_id_from_task(task_id)));
+
+CREATE POLICY "Editors can update task dependencies"
+  ON task_dependencies FOR UPDATE
+  USING (is_project_editor(auth.uid(), get_project_id_from_task(task_id)));
+
+CREATE POLICY "Editors can delete task dependencies"
+  ON task_dependencies FOR DELETE
+  USING (is_project_editor(auth.uid(), get_project_id_from_task(task_id)));
+
+-- Migrate existing data
+INSERT INTO task_dependencies (task_id, predecessor_id, dependency_type)
+SELECT id, depends_on, dependency_type
+FROM tasks
+WHERE depends_on IS NOT NULL;
+
+-- Enable realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE task_dependencies;
+```
+
+**Updated `cascade_task_dates` RPC (key change):**
+```text
+-- Instead of: SELECT ... FROM tasks WHERE depends_on = current_id
+-- Use: SELECT td.task_id, td.dependency_type, t.start_date, t.end_date
+--      FROM task_dependencies td
+--      JOIN tasks t ON t.id = td.task_id
+--      WHERE td.predecessor_id = current_id
+-- For each successor, also check ALL its other predecessors
+-- to pick the latest (most restrictive) start date
+```
+
+**Reconciliation loop change:**
+```text
+for (const task of allTasksFlat) {
+  if (task.dependencies.length === 0) continue;
+  // Compute scheduled start from EACH predecessor
+  let latestStart = null;
+  for (const dep of task.dependencies) {
+    const pred = allTasksFlat.find(t => t.id === dep.predecessorId);
+    if (!pred) continue;
+    const eff = getEffectiveDates(pred);
+    const scheduled = scheduleTask(..., dep.type, ...);
+    if (!latestStart || scheduled.startDate > latestStart) {
+      latestStart = scheduled.startDate;
+    }
+  }
+  // Only update if latestStart differs, preserving duration
+}
+```
+
+**Critical path forward pass change:**
+```text
+const getES = (id) => {
+  const t = taskMap.get(id);
+  if (t.dependencies.length === 0) return parseISO(t.startDate);
+  // ES = max of all predecessor EFs + 1 day
+  const earliest = Math.max(
+    ...t.dependencies.map(d => getEF(d.predecessorId) + DAY_MS)
+  );
+  return earliest;
+};
+```
+
+### Files Changed
+- **1 migration file**: new `task_dependencies` table + data migration + updated `cascade_task_dates` RPC
+- `src/types/project.ts`: add `TaskDependency` interface and `dependencies` array
+- `src/hooks/useProjectData.ts`: fetch dependencies, reconciliation, circular detection, cascade, CRUD
+- `src/lib/criticalPath.ts`: multi-predecessor forward/backward pass
+- `src/components/TaskDialog.tsx`: multi-dependency UI
+- `src/components/TaskRow.tsx`: dependency count display
+- `src/components/TimelineView.tsx`: multiple dependency arrows
+- `src/context/ProjectContext.tsx`: minor type updates if needed
+- `src/data/mockData.ts`: add `dependencies` field to mock data
 
 ### What Stays the Same
-- The `scheduleTask` function (unchanged)
-- The `cascade_task_dates` RPC call in `updateTask` (unchanged -- this handles explicit cascades when dates/buffer change)
-- Realtime subscriptions (unchanged)
-- Task Dialog save logic (unchanged)
-- "Refresh Schedule" button (unchanged)
+- Buffer logic (unchanged)
+- Milestone logic (unchanged)
+- Sub-task hierarchy and roll-up (unchanged)
+- Bucket CRUD (unchanged)
+- Activity logging (unchanged)
+- RLS on all other tables (unchanged)
+
