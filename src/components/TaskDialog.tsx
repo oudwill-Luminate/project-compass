@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
-import { CalendarIcon, AlertTriangle, Info, Diamond, Plus, X } from 'lucide-react';
+import { CalendarIcon, AlertTriangle, Info, Diamond, Plus, X, Pin, HelpCircle } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { TaskChecklist, ChecklistItem } from '@/components/TaskChecklist';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { Task, TaskStatus, TaskPriority, DependencyType, TaskDependency, STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/project';
+import { Task, TaskStatus, TaskPriority, DependencyType, TaskDependency, ScheduleConstraintType, STATUS_CONFIG, PRIORITY_CONFIG, CONSTRAINT_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -534,6 +535,73 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
               </div>
             ))}
           </div>
+
+          {/* Schedule Constraint */}
+          {!(task.subTasks && task.subTasks.length > 0) && (
+          <div className="p-3 rounded-lg border space-y-3">
+            <div className="flex items-center gap-2">
+              <Pin className="w-4 h-4 text-primary" />
+              <Label className="text-xs font-medium">Schedule Constraint</Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[280px] text-xs">
+                    Constraints override or limit how dependencies set this task's dates. Use ASAP (default) to let dependencies drive scheduling.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <Select
+              value={formData.constraintType || 'ASAP'}
+              onValueChange={(v: ScheduleConstraintType) => {
+                if (v === 'ASAP') {
+                  setFormData({ ...formData, constraintType: v, constraintDate: null });
+                } else {
+                  setFormData({ ...formData, constraintType: v, constraintDate: formData.constraintDate || formData.startDate });
+                }
+              }}
+            >
+              <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover">
+                {Object.entries(CONSTRAINT_CONFIG).map(([key, config]) => (
+                  <SelectItem key={key} value={key}>
+                    <span>{key} — {config.label}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {formData.constraintType && formData.constraintType !== 'ASAP' && (
+              <>
+                <p className="text-[11px] text-muted-foreground">
+                  {CONSTRAINT_CONFIG[formData.constraintType].description}
+                </p>
+                <div>
+                  <Label className="text-xs font-medium">Constraint Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal mt-1 text-xs")}>
+                        <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                        {formData.constraintDate ? format(parseISO(formData.constraintDate), 'MMM dd, yyyy') : 'Pick a date'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={formData.constraintDate ? parseISO(formData.constraintDate) : undefined}
+                        onSelect={date => {
+                          if (date) setFormData({ ...formData, constraintDate: format(date, 'yyyy-MM-dd') });
+                        }}
+                        className="pointer-events-auto"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </>
+            )}
+          </div>
+          )}
 
           {/* Contingency Buffer - hidden for parent tasks */}
           {!(task.subTasks && task.subTasks.length > 0) && (

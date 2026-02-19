@@ -517,6 +517,8 @@ export type Database = {
           bucket_id: string
           buffer_days: number
           buffer_position: string
+          constraint_date: string | null
+          constraint_type: Database["public"]["Enums"]["schedule_constraint"]
           created_at: string
           dependency_type: Database["public"]["Enums"]["dependency_type"]
           depends_on: string | null
@@ -548,6 +550,8 @@ export type Database = {
           bucket_id: string
           buffer_days?: number
           buffer_position?: string
+          constraint_date?: string | null
+          constraint_type?: Database["public"]["Enums"]["schedule_constraint"]
           created_at?: string
           dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
@@ -579,6 +583,8 @@ export type Database = {
           bucket_id?: string
           buffer_days?: number
           buffer_position?: string
+          constraint_date?: string | null
+          constraint_type?: Database["public"]["Enums"]["schedule_constraint"]
           created_at?: string
           dependency_type?: Database["public"]["Enums"]["dependency_type"]
           depends_on?: string | null
@@ -685,6 +691,14 @@ export type Database = {
         | "leading"
       project_role: "owner" | "editor" | "viewer"
       risk_action_type: "mitigation" | "contingency"
+      schedule_constraint:
+        | "ASAP"
+        | "SNET"
+        | "SNLT"
+        | "MSO"
+        | "MFO"
+        | "FNET"
+        | "FNLT"
       task_priority: "critical" | "high" | "medium" | "low"
       task_status: "done" | "working" | "stuck" | "not-started"
     }
@@ -824,6 +838,15 @@ export const Constants = {
       ],
       project_role: ["owner", "editor", "viewer"],
       risk_action_type: ["mitigation", "contingency"],
+      schedule_constraint: [
+        "ASAP",
+        "SNET",
+        "SNLT",
+        "MSO",
+        "MFO",
+        "FNET",
+        "FNLT",
+      ],
       task_priority: ["critical", "high", "medium", "low"],
       task_status: ["done", "working", "stuck", "not-started"],
     },

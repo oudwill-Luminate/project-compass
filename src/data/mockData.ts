@@ -12,7 +12,7 @@ const owners: Owner[] = [
   { id: 'o5', name: 'Chris Park', color: '#E2445C' },
 ];
 
-const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTasks' | 'bufferDays' | 'bufferPosition' | 'responsible' | 'progress' | 'riskDescription' | 'baselineStartDate' | 'baselineEndDate' | 'effortHours' | 'realizedCost' | 'isMilestone' | 'dependencies'> & { bufferDays?: number; bufferPosition?: 'start' | 'end'; responsible?: string | null; progress?: number; riskDescription?: string; effortHours?: number; realizedCost?: number; isMilestone?: boolean }): import('@/types/project').Task => ({
+const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTasks' | 'bufferDays' | 'bufferPosition' | 'responsible' | 'progress' | 'riskDescription' | 'baselineStartDate' | 'baselineEndDate' | 'effortHours' | 'realizedCost' | 'isMilestone' | 'dependencies' | 'constraintType' | 'constraintDate'> & { bufferDays?: number; bufferPosition?: 'start' | 'end'; responsible?: string | null; progress?: number; riskDescription?: string; effortHours?: number; realizedCost?: number; isMilestone?: boolean }): import('@/types/project').Task => ({
   ...props,
   parentTaskId: null,
   bufferDays: props.bufferDays ?? 0,
@@ -25,6 +25,8 @@ const t = (props: Omit<import('@/types/project').Task, 'parentTaskId' | 'subTask
   isMilestone: props.isMilestone ?? false,
   baselineStartDate: null,
   baselineEndDate: null,
+  constraintType: 'ASAP',
+  constraintDate: null,
   dependencies: props.dependsOn ? [{ predecessorId: props.dependsOn, type: (props.dependencyType || 'FS') as import('@/types/project').DependencyType }] : [],
   subTasks: [],
 });

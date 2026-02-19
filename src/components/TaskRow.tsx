@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { format, parseISO, addDays, differenceInDays } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare, Diamond } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare, Diamond, Pin } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
+import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority, CONSTRAINT_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
 import { OwnerAvatar } from './OwnerAvatar';
 import { TaskDialog } from './TaskDialog';
@@ -264,12 +264,18 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
   }
 
   if (show('start')) {
+    const isConstrained = task.constraintType && task.constraintType !== 'ASAP';
     cells.push(
       <span key="start" className="text-muted-foreground text-xs flex items-center gap-1">
         {format(parseISO(rolled.startDate), 'MMM dd')}
         {task.isMilestone && <Diamond className="w-3 h-3 text-primary" fill="currentColor" />}
         {!task.isMilestone && task.bufferDays > 0 && task.bufferPosition === 'start' && (
           <span title={`${task.bufferDays}d buffer (start)`}><Shield className="w-3 h-3 text-primary" /></span>
+        )}
+        {isConstrained && (
+          <span title={`${task.constraintType}: ${CONSTRAINT_CONFIG[task.constraintType].label}${task.constraintDate ? ` (${format(parseISO(task.constraintDate), 'MMM dd')})` : ''}`}>
+            <Pin className="w-3 h-3 text-amber-500" />
+          </span>
         )}
       </span>
     );
