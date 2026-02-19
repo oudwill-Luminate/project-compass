@@ -1,99 +1,113 @@
 
 
-## Fix: TaskDialog Duration Ignores Weekend Exclusion
+## Fix: Exclusion Links Not Cascading Properly in Schedule Engine
 
-### Root Cause
+### The Problem
 
-The TaskDialog calculates and displays duration using **calendar days** (`differenceInDays + 1`), completely ignoring the project's "Include Weekends" setting. When weekends are excluded:
+The scheduling cascade function (`cascade_task_dates`) has two bugs related to exclusion links:
 
-- A task from May 8 (Fri) to May 12 (Tue) shows as **5 days** (calendar), but is actually **3 working days** (Fri, Mon, Tue)
-- When the user types "5" in the duration field, it computes `May 8 + 4 calendar days = May 12`, which is only 3 working days -- not 5
+1. **Buffer not considered in exclusion checks**: When the cascade checks for overlaps between exclusion-linked tasks, it uses the other task's raw `end_date` -- ignoring its buffer days. For example, Fire Suppression ends May 4 but has a 1-day end buffer (effective end = May 5). Ductwork should start May 6, but the exclusion check only looks at May 4.
 
-The same mismatch exists in the scheduling engine (both JS and SQL), which uses `working_days_diff` (non-inclusive of start day). So the cascade RPC sees the task as having 2 working-day duration, preserves that, and the dates never match what the user intended.
+2. **Exclusion-linked tasks aren't re-queued**: The cascade only processes tasks via dependency chains. If you change Fire Suppression's dates, Ductwork Distribution won't be re-evaluated because Ductwork depends on Dry-Wall:Phase 1 (not Fire Suppression). They're only linked via an exclusion link. The RPC doesn't add exclusion-linked tasks to its processing queue.
+
+3. **Processing order is non-deterministic**: When multiple successors of the same predecessor all have exclusion links with each other (Plumbing-Distribution, Fire Suppression, Ductwork Distribution are all successors of Dry-Wall:Phase 1), SQL doesn't guarantee processing order. If Ductwork is processed before Fire Suppression, it reads Fire Suppression's stale dates and can't properly chain after it.
+
+### Current Data
+
+The scheduling chain looks like this:
+
+```text
+Dry-Wall:Phase 1 (Apr 13-24, +2 buffer)
+  ├── [FS dep] Plumbing-Distribution (Apr 29-30, +1 buffer)
+  ├── [FS dep] Fire Suppression (May 1-4, +1 buffer)
+  └── [FS dep] Ductwork Distribution (May 13-15, +2 buffer) <-- STUCK, should be ~May 6
+
+Exclusion links:
+  Plumbing-Distribution <-> Ductwork Distribution
+  Plumbing-Distribution <-> Fire Suppression
+  Fire Suppression <-> Ductwork Distribution
+  Fire Suppression <-> New Electrical Distribution
+  Ductwork Distribution <-> New Electrical Distribution
+```
+
+Ductwork should start right after Fire Suppression's effective end (May 4 + 1 buffer = May 5, so start May 6), but it's stuck at May 13.
 
 ### The Fix
 
-Make the TaskDialog respect `includeWeekends` in three places:
+**File: Database migration (new) -- update `cascade_task_dates` RPC**
 
-**File: `src/components/TaskDialog.tsx`**
+Three improvements to the exclusion handling:
 
-1. **Pull `project` from context** (line 65):
+1. **Sort successors by start date** so earlier tasks are processed first, establishing their dates before later exclusion-linked tasks check against them:
    ```text
-   const { updateTask, getAllTasks, members, project } = useProject();
+   ORDER BY t.start_date ASC
    ```
 
-2. **Duration display** (line 92-96) -- count working days when weekends are excluded:
+2. **Account for buffer in exclusion checks** -- read the other task's `buffer_days` and `buffer_position`, compute its effective end, and use that for overlap detection and shift calculation:
    ```text
-   const duration = useMemo(() => {
-     try {
-       if (project.includeWeekends) {
-         return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate)) + 1;
-       }
-       // Count only working days (inclusive of start and end)
-       let count = 0;
-       let d = parseISO(formData.startDate);
-       const end = parseISO(formData.endDate);
-       while (d <= end) {
-         if (d.getDay() !== 0 && d.getDay() !== 6) count++;
-         d = addDays(d, 1);
-       }
-       return Math.max(count, 1);
-     } catch { return 1; }
-   }, [formData.startDate, formData.endDate, project.includeWeekends]);
+   SELECT start_date, end_date, buffer_days, buffer_position
+     INTO other_start, other_end, other_buf, other_buf_pos
+     FROM tasks WHERE id = excl.other_id;
+
+   IF other_buf_pos = 'end' THEN
+     other_eff := add_working_days(other_end, other_buf, _include_weekends);
+   ELSE
+     other_eff := other_end;
+   END IF;
+
+   IF final_s <= other_eff AND new_e >= other_start THEN
+     final_s := next_working_day(other_eff + 1, _include_weekends);
+     new_e := add_working_days(final_s, dep_duration, _include_weekends);
+   END IF;
    ```
 
-3. **Duration change handler** (line 104-111) -- add working days when setting end date:
+3. **Add exclusion-linked tasks to the cascade queue** so that when a task is updated and overlaps with an exclusion-linked task, that linked task gets re-evaluated in a subsequent iteration:
    ```text
-   const handleDurationChange = (val: string) => {
-     setDurationInput(val);
-     const days = parseInt(val, 10);
-     if (!isNaN(days) && days > 0) {
-       let newEnd: Date;
-       if (project.includeWeekends) {
-         newEnd = addDays(parseISO(formData.startDate), days - 1);
-       } else {
-         // Add (days - 1) working days from start
-         let remaining = days - 1; // start day counts as day 1
-         newEnd = parseISO(formData.startDate);
-         while (remaining > 0) {
-           newEnd = addDays(newEnd, 1);
-           if (newEnd.getDay() !== 0 && newEnd.getDay() !== 6) remaining--;
-         }
-       }
-       setFormData(prev => ({ ...prev, endDate: format(newEnd, 'yyyy-MM-dd') }));
-     }
-   };
+   -- After updating successor at line 146:
+   FOR excl IN
+     SELECT ... FROM task_exclusions WHERE task_a_id = dep.succ_id OR task_b_id = dep.succ_id
+   LOOP
+     IF NOT (excl.other_id = ANY(visited)) THEN
+       queue := queue || excl.other_id;
+     END IF;
+   END LOOP;
    ```
 
-4. **Rolled-up parent duration** (line 302) -- also use working days for parent tasks:
-   ```text
-   const rolledDuration = project.includeWeekends
-     ? differenceInDays(parseISO(rolledEnd), parseISO(rolledStart)) + 1
-     : (() => {
-         let count = 0;
-         let d = parseISO(rolledStart);
-         const end = parseISO(rolledEnd);
-         while (d <= end) {
-           if (d.getDay() !== 0 && d.getDay() !== 6) count++;
-           d = addDays(d, 1);
-         }
-         return Math.max(count, 1);
-       })();
-   ```
+**File: `src/hooks/useProjectData.ts`**
+
+After calling `cascade_task_dates` in `updateTask`, also trigger cascades for tasks that are exclusion-linked to the updated task. This handles the case where the user changes Fire Suppression directly -- Ductwork needs to be re-evaluated even though it doesn't depend on Fire Suppression:
+
+```text
+// After the main cascade call (~line 815):
+if (oldTask.exclusionLinks?.length > 0) {
+  for (const linkedId of oldTask.exclusionLinks) {
+    await supabase.rpc('cascade_task_dates', {
+      _task_id: linkedId,
+      _new_start: (await supabase.from('tasks').select('start_date').eq('id', linkedId).single()).data?.start_date,
+      _new_end: (await supabase.from('tasks').select('end_date').eq('id', linkedId).single()).data?.end_date,
+      _include_weekends: project.includeWeekends,
+    });
+  }
+}
+```
 
 ### Result
 
-- Duration field will show **3** for a Fri-to-Tue task (working days) instead of **5** (calendar days)
-- Typing "5" will compute end date as the 5th working day from start (skipping weekends)
-- The scheduling engine and UI will be in agreement on duration semantics
+- When any task's dates change, exclusion-linked tasks are automatically re-evaluated
+- Buffer days are properly considered when determining exclusion overlap and shift
+- Sibling successors with exclusion links are processed in chronological order, ensuring correct chaining
+- Ductwork Distribution will move up to start immediately after Fire Suppression's effective end
 
 ### Files Changed
 
-- `src/components/TaskDialog.tsx`: Use working-day-aware duration calculation and input handling
+- Database migration: Replace `cascade_task_dates` function with buffer-aware exclusion checks, ordered successor processing, and exclusion queue propagation
+- `src/hooks/useProjectData.ts`: After cascade call in `updateTask`, also cascade exclusion-linked tasks
 
 ### What Stays the Same
 
-- All scheduling engine code (already uses working days correctly)
-- Cascade RPC (unchanged)
-- Database schema and RLS policies (unchanged)
-- Reconciliation logic (unchanged)
+- Task duration is always preserved (only start/end dates shift)
+- Dependency logic (FS, FF, SS, SF) unchanged
+- Constraint logic (SNET, MSO, etc.) unchanged
+- In-memory reconciliation/exclusion pass in `fetchAll` unchanged
+- TaskDialog, database schema, and RLS policies unchanged
+
