@@ -1,88 +1,94 @@
 
 
-## Fix: Tasks Not Rescheduling When Dependencies Are Added
+## Fix: Refresh Schedule Must Persist Corrected Dates
 
 ### Root Cause
 
-When you add "Trim Install" as a dependency of "Painting - Interior", two things go wrong:
+The scheduling engine has two layers:
+1. **In-memory reconciliation** (runs on every `fetchAll`): correctly computes ASAP pull-forward and exclusion shifts, but deliberately does NOT write to the database ("to avoid feedback loop")
+2. **Cascade RPC** (runs on task save): reads dates from the database to propagate changes
 
-1. **The date adjustment only pushes tasks later, never earlier**: At line 677, the code checks `if (currentStart < latestScheduled.startDate)` -- meaning it only moves a task if it starts *before* the dependency allows. "Painting - Interior" starts *after* its predecessor's end, so the condition is false and the dates are left unchanged.
+The problem: these two layers are disconnected. The in-memory reconciliation correctly calculates that Ductwork Distribution should start May 5 (not May 13), but never persists that. So when the cascade RPC runs for downstream tasks, it reads the stale May 13 date from the database. This cascades through the chain:
 
-2. **The cascade RPC is never called**: Because the dates didn't change (bug #1), the `datesChanged` flag remains false, so the cascade engine at line 822-830 is skipped entirely. The task's database dates are never updated.
+```text
+Ductwork Distribution: DB=May 13 (should be May 5)
+  -> New Electrical Distribution: DB=May 20 (should be ~May 9)
+    -> Dry-Wall: Phase 2: DB=May 29 (should be ~May 15)
+```
 
-In summary: adding a dependency currently does nothing to pull an ASAP task forward to its correct earliest start.
+The `refreshSchedule` button just calls `fetchAll()` again, which re-runs the in-memory fix but still never saves it.
 
 ### The Fix
 
 **File: `src/hooks/useProjectData.ts`**
 
-**Change 1 -- Pull ASAP tasks forward when dependency is added (around line 674-681)**
-
-Update the dependency scheduling block to also pull ASAP tasks forward when they start later than their dependencies require:
-
-```text
-// BEFORE (line 676-679):
-const currentStart = updates.startDate || oldTask.startDate;
-if (currentStart < latestScheduled.startDate) {
-  updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
-}
-
-// AFTER:
-const currentStart = updates.startDate || oldTask.startDate;
-const taskConstraint = (updates.constraintType || oldTask.constraintType) as ScheduleConstraintType;
-if (currentStart < latestScheduled.startDate) {
-  // Task starts too early -- always shift forward
-  updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
-} else if (taskConstraint === 'ASAP' && currentStart > latestScheduled.startDate) {
-  // ASAP task starts later than needed -- pull it forward
-  updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
-}
-```
-
-**Change 2 -- Trigger cascade when dependencies change (around line 868-872)**
-
-When only dependencies change (but not dates directly), we still need to call the cascade RPC so that the new dates propagate to successor tasks:
+Create a dedicated `refreshSchedule` function that:
+1. Runs the same reconciliation logic as `fetchAll`
+2. Compares reconciled dates against the database dates
+3. Persists any corrected dates to the database
+4. Calls `cascade_task_dates` for each changed task so successors update
+5. Re-fetches to reflect the final state
 
 ```text
-// BEFORE (line 870):
-if (datesChanged || dependencyChanged) {
-  fetchAll();
-}
+const refreshSchedule = useCallback(async () => {
+  if (!project || !projectId) return;
 
-// AFTER:
-if (dependencyChanged && !datesChanged) {
-  // Dependencies changed but updateTask scheduling already set new dates above.
-  // Call cascade to propagate to successors.
-  const updatedStart = updates.startDate || oldTask.startDate;
-  const updatedEnd = updates.endDate || oldTask.endDate;
-  await supabase.rpc('cascade_task_dates', {
-    _task_id: taskId,
-    _new_start: updatedStart,
-    _new_end: updatedEnd,
-    _include_weekends: project.includeWeekends,
-  });
-}
-if (datesChanged || dependencyChanged) {
-  fetchAll();
-}
+  const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+  const includeWeekends = project.includeWeekends;
+
+  // --- Pass 1: Dependency reconciliation (same logic as fetchAll) ---
+  for (const task of allTasks) {
+    // Compute latestStart from all predecessors (existing logic)
+    // If ASAP and task.startDate > latestStart, pull forward
+    // Apply constraint overrides
+    // Record original vs corrected dates
+  }
+
+  // --- Pass 2: Exclusion pass (same logic as fetchAll) ---
+  // Shift overlapping exclusion-linked tasks
+
+  // --- Pass 3: Persist changes ---
+  // For each task where dates changed:
+  //   1. UPDATE tasks SET start_date, end_date WHERE id = task.id
+  //   2. Call cascade_task_dates to propagate to successors
+
+  // --- Pass 4: Re-fetch ---
+  await fetchAll();
+}, [project, projectId, fetchAll]);
 ```
 
-### Why This Fixes the Problem
+**File: `src/context/ProjectContext.tsx`**
 
-- When you add "Trim Install" as a dependency of "Painting - Interior":
-  - The scheduling block computes the earliest start after Trim Install
-  - Since Painting has ASAP constraint and starts later than needed, it gets pulled forward
-  - The updated dates are written to the database
-  - The cascade RPC is called so any tasks depending on Painting also get rescheduled
-  - `fetchAll()` refreshes the UI with the corrected dates
+Update to use the new dedicated `refreshSchedule` function instead of just `refetch`.
+
+### Technical Details
+
+The key difference from the current approach:
+- Current: `refreshSchedule` = `fetchAll()` = in-memory only
+- Fixed: `refreshSchedule` = reconcile + persist to DB + cascade + fetchAll
+
+To avoid the feedback loop that the original design was concerned about:
+- The realtime subscription triggers `fetchAll()` (in-memory only, as before)
+- Only the explicit `refreshSchedule` action persists changes
+- This is safe because `refreshSchedule` is user-initiated (button click), not triggered by realtime events
+
+The persist step will batch updates and cascades in dependency order (topological sort) so that upstream tasks are persisted before downstream tasks cascade from them.
+
+### What This Fixes
+
+- Ductwork Distribution will be persisted at May 5 (pulled forward from May 13)
+- New Electrical Distribution will cascade to ~May 9 (instead of May 20)
+- Dry-Wall: Phase 2 will cascade to ~May 15 (instead of May 29)
+- All successor chains will reflect the correct dates in both the UI and database
 
 ### Files Changed
 
-- `src/hooks/useProjectData.ts`: Fix dependency scheduling condition and ensure cascade runs on dependency changes
+- `src/hooks/useProjectData.ts`: Add dedicated `refreshSchedule` function that persists reconciled dates and cascades
+- `src/context/ProjectContext.tsx`: Wire up the new `refreshSchedule` instead of `refetch`
 
 ### What Stays the Same
 
-- Cascade RPC (unchanged)
-- In-memory reconciliation in fetchAll (already has ASAP pull-forward -- this fix ensures it also works at save time)
-- TaskDialog (unchanged)
-- Database schema and RLS policies (unchanged)
+- The `fetchAll` in-memory reconciliation (unchanged, still runs on every data load)
+- Cascade RPC logic (unchanged)
+- TaskDialog, database schema, RLS policies (unchanged)
+- Realtime subscription behavior (unchanged)
