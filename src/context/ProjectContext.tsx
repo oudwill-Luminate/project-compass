@@ -41,7 +41,7 @@ interface ProjectContextType {
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
 export function ProjectProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
-  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask, setBaseline: dbSetBaseline, clearBaseline: dbClearBaseline, updateCharter: dbUpdateCharter, goals, addGoal: dbAddGoal, updateGoal: dbUpdateGoal, deleteGoal: dbDeleteGoal, criticalTaskIds, slackDays, refetch } = useProjectData(projectId);
+  const { project, members, loading, updateTask: dbUpdateTask, updateContingency: dbUpdateContingency, updateIncludeWeekends: dbUpdateIncludeWeekends, updateProjectName: dbUpdateProjectName, deleteProject: dbDeleteProject, addBucket: dbAddBucket, updateBucket: dbUpdateBucket, deleteBucket: dbDeleteBucket, moveBucket: dbMoveBucket, addTask: dbAddTask, createTaskFull: dbCreateTaskFull, moveTask: dbMoveTask, deleteTask: dbDeleteTask, setBaseline: dbSetBaseline, clearBaseline: dbClearBaseline, updateCharter: dbUpdateCharter, goals, addGoal: dbAddGoal, updateGoal: dbUpdateGoal, deleteGoal: dbDeleteGoal, criticalTaskIds, slackDays, refreshSchedule: dbRefreshSchedule } = useProjectData(projectId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
@@ -114,7 +114,7 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
         members,
         criticalTaskIds,
         slackDays,
-        refreshSchedule: refetch,
+        refreshSchedule: dbRefreshSchedule,
       }}
     >
       {children}

@@ -1262,5 +1262,196 @@ export function useProjectData(projectId: string | undefined) {
     return computeCriticalPath(allTasks);
   }, [project]);
 
-  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, profiles, toOwner, updateCharter, goals, addGoal, updateGoal, deleteGoal, criticalTaskIds, slackDays };
+  // Persistence-aware refresh: reconcile in-memory, persist changed dates, cascade, re-fetch
+  const refreshSchedule = useCallback(async () => {
+    if (!project || !projectId) return;
+
+    const allTasks = project.buckets.flatMap(b => flattenTasks(b.tasks));
+    const includeWeekends = project.includeWeekends;
+
+    // Build a map of original DB dates (current state before reconciliation)
+    const originalDates = new Map<string, { startDate: string; endDate: string }>();
+    for (const task of allTasks) {
+      originalDates.set(task.id, { startDate: task.startDate, endDate: task.endDate });
+    }
+
+    // --- Pass 1: Dependency reconciliation (same as fetchAll) ---
+    for (const task of allTasks) {
+      const deps = task.dependencies.length > 0
+        ? task.dependencies
+        : (task.dependsOn ? [{ predecessorId: task.dependsOn, type: task.dependencyType }] : []);
+
+      let latestStart: string | null = null;
+      if (deps.length > 0) {
+        for (const dep of deps) {
+          const pred = allTasks.find(t => t.id === dep.predecessorId);
+          if (!pred) continue;
+          const eff = getEffectiveDates(pred);
+          const scheduled = scheduleTask(
+            { ...pred, startDate: eff.startDate, endDate: eff.endDate },
+            task,
+            dep.type,
+            includeWeekends
+          );
+          if (!latestStart || scheduled.startDate > latestStart) {
+            latestStart = scheduled.startDate;
+          }
+        }
+      }
+
+      const currentDuration = workingDaysDiff(
+        parseISO(task.startDate), parseISO(task.endDate), includeWeekends
+      );
+
+      let finalStart = task.startDate;
+      let finalEnd = task.endDate;
+      if (latestStart) {
+        const shouldShift =
+          task.startDate < latestStart ||
+          (task.constraintType === 'ASAP' && task.startDate > latestStart);
+        if (shouldShift) {
+          finalStart = latestStart;
+          finalEnd = format(
+            addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
+            'yyyy-MM-dd'
+          );
+        }
+      }
+
+      // Apply schedule constraints
+      if (task.constraintType !== 'ASAP' && task.constraintDate) {
+        const cd = task.constraintDate;
+        switch (task.constraintType) {
+          case 'SNET':
+            if (cd > finalStart) {
+              finalStart = cd;
+              finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
+            }
+            break;
+          case 'MSO':
+            finalStart = cd;
+            finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
+            break;
+          case 'MFO':
+            finalEnd = cd;
+            finalStart = format(addWorkingDays(parseISO(cd), -currentDuration, includeWeekends), 'yyyy-MM-dd');
+            break;
+          case 'FNET':
+            if (cd > finalEnd) finalEnd = cd;
+            break;
+          default:
+            break;
+        }
+      }
+
+      if (finalStart !== task.startDate || finalEnd !== task.endDate) {
+        task.startDate = finalStart;
+        task.endDate = finalEnd;
+      }
+    }
+
+    // --- Pass 2: Exclusion pass (same as fetchAll) ---
+    const processed = new Set<string>();
+    for (const task of allTasks) {
+      if (task.exclusionLinks.length === 0) continue;
+      for (const linkedId of task.exclusionLinks) {
+        const pairKey = [task.id, linkedId].sort().join('-');
+        if (processed.has(pairKey)) continue;
+        processed.add(pairKey);
+        const linked = allTasks.find(t => t.id === linkedId);
+        if (!linked) continue;
+        const taskEffEnd = task.bufferDays > 0 && task.bufferPosition === 'end'
+          ? format(addWorkingDays(parseISO(task.endDate), task.bufferDays, includeWeekends), 'yyyy-MM-dd')
+          : task.endDate;
+        const linkedEffEnd = linked.bufferDays > 0 && linked.bufferPosition === 'end'
+          ? format(addWorkingDays(parseISO(linked.endDate), linked.bufferDays, includeWeekends), 'yyyy-MM-dd')
+          : linked.endDate;
+        if (task.startDate <= linkedEffEnd && taskEffEnd >= linked.startDate) {
+          const laterTask = task.startDate >= linked.startDate ? task : linked;
+          const earlierTask = laterTask === task ? linked : task;
+          const laterDuration = workingDaysDiff(parseISO(laterTask.startDate), parseISO(laterTask.endDate), includeWeekends);
+          const earlierEffEnd = earlierTask.bufferDays > 0 && earlierTask.bufferPosition === 'end'
+            ? addWorkingDays(parseISO(earlierTask.endDate), earlierTask.bufferDays, includeWeekends)
+            : parseISO(earlierTask.endDate);
+          const newStart = nextWorkingDay(addDays(earlierEffEnd, 1), includeWeekends);
+          const newEnd = addWorkingDays(newStart, laterDuration, includeWeekends);
+          laterTask.startDate = format(newStart, 'yyyy-MM-dd');
+          laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
+        }
+      }
+    }
+
+    // --- Pass 3: Topological sort & persist changed dates ---
+    // Build adjacency for topo sort: predecessors before successors
+    const taskMap = new Map(allTasks.map(t => [t.id, t]));
+    const inDegree = new Map<string, number>();
+    const successors = new Map<string, string[]>();
+    for (const t of allTasks) {
+      if (!inDegree.has(t.id)) inDegree.set(t.id, 0);
+      const deps = t.dependencies.length > 0
+        ? t.dependencies
+        : (t.dependsOn ? [{ predecessorId: t.dependsOn, type: t.dependencyType }] : []);
+      for (const dep of deps) {
+        inDegree.set(t.id, (inDegree.get(t.id) || 0) + 1);
+        const s = successors.get(dep.predecessorId) || [];
+        s.push(t.id);
+        successors.set(dep.predecessorId, s);
+      }
+    }
+
+    const queue: string[] = [];
+    for (const [id, deg] of inDegree) {
+      if (deg === 0) queue.push(id);
+    }
+    const topoOrder: string[] = [];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      topoOrder.push(id);
+      for (const succId of (successors.get(id) || [])) {
+        const newDeg = (inDegree.get(succId) || 1) - 1;
+        inDegree.set(succId, newDeg);
+        if (newDeg === 0) queue.push(succId);
+      }
+    }
+    // Add any remaining tasks not in the topo order (no deps)
+    for (const t of allTasks) {
+      if (!topoOrder.includes(t.id)) topoOrder.push(t.id);
+    }
+
+    // Persist in topological order and cascade each changed task
+    let changedCount = 0;
+    for (const taskId of topoOrder) {
+      const task = taskMap.get(taskId);
+      if (!task) continue;
+      const orig = originalDates.get(taskId);
+      if (!orig) continue;
+      if (task.startDate !== orig.startDate || task.endDate !== orig.endDate) {
+        changedCount++;
+        // Persist the corrected dates
+        await supabase.from('tasks').update({
+          start_date: task.startDate,
+          end_date: task.endDate,
+        }).eq('id', taskId);
+
+        // Cascade to successors so the RPC also processes downstream tasks
+        await supabase.rpc('cascade_task_dates', {
+          _task_id: taskId,
+          _new_start: task.startDate,
+          _new_end: task.endDate,
+          _include_weekends: includeWeekends,
+        });
+      }
+    }
+
+    if (changedCount > 0) {
+      toast.success(`Schedule refreshed: ${changedCount} task${changedCount > 1 ? 's' : ''} updated`);
+    } else {
+      toast.info('Schedule is already up to date');
+    }
+
+    // --- Pass 4: Re-fetch to reflect final persisted state ---
+    await fetchAll();
+  }, [project, projectId, fetchAll]);
+
+  return { project, members, loading, updateTask, updateContingency, updateIncludeWeekends, addBucket, updateBucket, deleteBucket, moveBucket, addTask, createTaskFull, moveTask, deleteTask, updateProjectName, deleteProject, setBaseline, clearBaseline, refetch: fetchAll, refreshSchedule, profiles, toOwner, updateCharter, goals, addGoal, updateGoal, deleteGoal, criticalTaskIds, slackDays };
 }
