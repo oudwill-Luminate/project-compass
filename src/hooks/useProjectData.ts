@@ -805,19 +805,12 @@ export function useProjectData(projectId: string | undefined) {
       bufferChanged;
 
     if (datesChanged) {
-      // Compute effective dates accounting for buffer
-      const effectiveEnd = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'end'
-        ? format(addWorkingDays(parseISO(updatedTask.endDate), updatedTask.bufferDays, project.includeWeekends), 'yyyy-MM-dd')
-        : updatedTask.endDate;
-      const effectiveStart = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'start'
-        ? format(addWorkingDays(parseISO(updatedTask.startDate), -updatedTask.bufferDays, project.includeWeekends), 'yyyy-MM-dd')
-        : updatedTask.startDate;
-
-      // Atomic cascade via database function — all dependents rescheduled in a single transaction
+      // Pass actual task dates to cascade — the RPC already reads buffer_days/buffer_position
+      // from the database and accounts for them when scheduling successors.
       await supabase.rpc('cascade_task_dates', {
         _task_id: taskId,
-        _new_start: effectiveStart,
-        _new_end: effectiveEnd,
+        _new_start: updatedTask.startDate,
+        _new_end: updatedTask.endDate,
         _include_weekends: project.includeWeekends,
       });
 
@@ -826,16 +819,18 @@ export function useProjectData(projectId: string | undefined) {
       if (oldTask.parentTaskId) {
         const parentTask = allTasks.find(t => t.id === oldTask.parentTaskId);
         if (parentTask) {
-          // Recompute parent's rolled-up dates after this sub-task update
           const updatedParentSubs = parentTask.subTasks.map(s =>
             s.id === taskId ? { ...s, ...updates } : s
           );
-          const tempParent = { ...parentTask, subTasks: updatedParentSubs };
-          const parentEffective = getEffectiveDates(tempParent);
+          // Compute parent's actual rolled-up dates (min start, max end) without buffer
+          const subStarts = updatedParentSubs.map(s => s.startDate);
+          const subEnds = updatedParentSubs.map(s => s.endDate);
+          const parentStart = subStarts.reduce((min, d) => d < min ? d : min, subStarts[0]);
+          const parentEnd = subEnds.reduce((max, d) => d > max ? d : max, subEnds[0]);
           await supabase.rpc('cascade_task_dates', {
             _task_id: parentTask.id,
-            _new_start: parentEffective.startDate,
-            _new_end: parentEffective.endDate,
+            _new_start: parentStart,
+            _new_end: parentEnd,
             _include_weekends: project.includeWeekends,
           });
         }
