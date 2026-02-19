@@ -1,91 +1,75 @@
 
 
-## Fix: Stop Reconciliation Feedback Loop From Reverting Duration
+## Fix: Cascade RPC Overwriting Task Dates With Buffer-Extended Values
 
-### The Problem
+### Root Cause
 
-The reconciliation and exclusion passes inside `fetchAll()` are writing date changes directly to the database. Every DB write triggers a realtime event, which triggers another `fetchAll()`, which runs the passes again, creating a feedback loop that overwrites your manual duration changes.
+When you save a task with buffer days (like "Ductwork Distribution" which has a 2-day end buffer), the system:
 
-The sequence:
-1. You save the new duration (e.g., 5 days) -- correctly written to the database
-2. Realtime event fires, triggering `fetchAll()`
-3. `fetchAll()` runs the exclusion pass, detects overlaps with exclusion-linked tasks
-4. The exclusion pass writes "corrected" dates to the database (fire-and-forget)
-5. Those writes trigger more realtime events, more `fetchAll()` calls
-6. Meanwhile, `updateTask` also calls `fetchAll()` explicitly
-7. Multiple `fetchAll()` calls race each other, each overwriting dates in the database
-8. The task's duration ends up reverting to whatever the exclusion/reconciliation math computes
+1. Correctly saves your new duration to the database
+2. Then calls the scheduling cascade function to update dependent tasks
+3. But it passes buffer-extended dates to that function (your end date + 2 buffer days)
+4. The cascade function's first action is to overwrite the task's own dates with what it received -- so it replaces your intended end date with one that's 2 days longer
+5. This triggers a data refresh, and you see the old (longer) duration
+
+The scheduling cascade function already handles buffer internally when calculating dependent tasks. By pre-computing the buffer and passing it in, the buffer gets applied twice and the task's own dates get corrupted.
 
 ### The Fix
 
-Remove all database writes from the `fetchAll()` reconciliation and exclusion passes. These passes should only adjust in-memory state (for correct display), not write back to the database. The authoritative scheduling enforcement is already handled by the `cascade_task_dates` RPC, which runs when dates actually change via `updateTask`.
+Pass the task's actual dates (not buffer-extended dates) to the cascade function. The cascade function already reads buffer settings from the database and accounts for them when scheduling dependent tasks.
 
 ### Technical Details
 
-**File: `src/hooks/useProjectData.ts`**
+**File: `src/hooks/useProjectData.ts` (~lines 807-822)**
 
-**Change 1: Reconciliation pass (lines 511-517)** -- Remove the `supabase.from('tasks').update(...)` call. Only update the in-memory task object so the UI displays correctly:
-
-```text
-// BEFORE:
-if (finalStart !== task.startDate || finalEnd !== task.endDate) {
-  supabase.from('tasks').update({
-    start_date: finalStart,
-    end_date: finalEnd,
-  }).eq('id', task.id).then(() => {});
-}
-
-// AFTER:
-if (finalStart !== task.startDate || finalEnd !== task.endDate) {
-  task.startDate = finalStart;
-  task.endDate = finalEnd;
-}
-```
-
-**Change 2: Exclusion pass (lines 538-543)** -- Same treatment. Remove the DB write and only update the in-memory task objects:
+Current code computes effective (buffer-extended) dates and passes them to the cascade:
 
 ```text
-// BEFORE:
-laterTask.startDate = format(newStart, 'yyyy-MM-dd');
-laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
-supabase.from('tasks').update({
-  start_date: laterTask.startDate,
-  end_date: laterTask.endDate,
-}).eq('id', laterTask.id).then(() => {});
+// BEFORE (bug: passes buffer-extended dates, RPC overwrites task with them):
+const effectiveEnd = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'end'
+  ? format(addWorkingDays(...), 'yyyy-MM-dd')
+  : updatedTask.endDate;
+const effectiveStart = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'start'
+  ? format(addWorkingDays(...), 'yyyy-MM-dd')
+  : updatedTask.startDate;
 
-// AFTER:
-laterTask.startDate = format(newStart, 'yyyy-MM-dd');
-laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
-// No DB write -- only in-memory for display.
-// Authoritative scheduling handled by cascade_task_dates RPC.
-```
-
-**Change 3: Move `setProject()` after reconciliation** -- Currently `setProject(proj)` is called at line 438 *before* the reconciliation loop modifies task dates. The reconciled dates are never reflected in React state. Move `setProject()` to after the exclusion pass so the UI displays the reconciled dates:
-
-```text
-// Remove setProject(proj) from line 438
-// Add it after the exclusion pass (after line 546):
-setProject({
-  ...proj,
-  buckets: proj.buckets.map(b => ({
-    ...b,
-    tasks: buildTaskTree(/* use the reconciled allTasksFlat */),
-  })),
+await supabase.rpc('cascade_task_dates', {
+  _task_id: taskId,
+  _new_start: effectiveStart,
+  _new_end: effectiveEnd,
+  ...
 });
 ```
 
-Since `allTasksFlat` is a flat array and we need tree structure, the simpler approach is to mutate the task objects in-place (they're fresh objects from `buildTaskTree`) during reconciliation, then call `setProject(proj)` afterward. The task objects in `proj.buckets[].tasks` are the same references as in `allTasksFlat`, so mutations are reflected.
+Fix: pass the actual task dates instead:
+
+```text
+// AFTER (fixed: pass actual dates, RPC handles buffer internally):
+await supabase.rpc('cascade_task_dates', {
+  _task_id: taskId,
+  _new_start: updatedTask.startDate,
+  _new_end: updatedTask.endDate,
+  _include_weekends: project.includeWeekends,
+});
+```
+
+The same fix applies to the parent-task cascade call (~lines 835-840), which should also pass the parent's actual rolled-up dates without pre-applying buffer.
+
+### Why This Fixes It
+
+- The cascade function already reads `buffer_days` and `buffer_position` from the database for each task it processes
+- It computes effective dates internally when determining successor schedules
+- By passing actual dates instead of effective dates, the function's initial `UPDATE tasks SET start_date, end_date` writes the correct (user-intended) values
+- Buffer is only applied once (inside the cascade function) rather than twice
 
 ### Files Changed
 
-- `src/hooks/useProjectData.ts`: Remove DB writes from reconciliation and exclusion passes; move `setProject()` after reconciliation
+- `src/hooks/useProjectData.ts`: Remove the effective-date computation before the cascade call; pass actual task dates directly
 
 ### What Stays the Same
 
-- `cascade_task_dates` RPC (unchanged -- still the authoritative scheduling engine)
-- `updateTask` logic (unchanged -- still calls cascade RPC when dates change)
-- TaskDialog fix (unchanged -- still only includes deps/exclusions when changed)
+- The cascade RPC itself (unchanged -- it already handles buffer correctly)
+- Reconciliation loop (unchanged -- already in-memory only)
+- TaskDialog (unchanged -- already only sends deps when changed)
 - All database schema and RLS policies (unchanged)
-- Realtime subscriptions (unchanged -- they still trigger fetchAll for data freshness)
-- "Refresh Schedule" button (unchanged)
 
