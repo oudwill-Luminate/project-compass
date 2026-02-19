@@ -1,150 +1,144 @@
 
 
-## Task Date Constraints (Manual Scheduling Override)
+## Non-Overlap (Exclusion) Links Between Tasks
 
 ### Background (PM Best Practices)
 
-In PMBOK and standard scheduling tools (MS Project, Primavera P6), every task has a **constraint type** that controls how the scheduler treats its dates. Currently, all tasks behave as "As Soon As Possible" (ASAP) -- they start at the earliest date allowed by their dependencies. But in construction and trade-based projects, you often need to say things like:
+In construction project management, there are situations where two tasks have no logical dependency (neither is a predecessor of the other) but they **cannot run at the same time** due to shared space, equipment, or crew constraints. For example, HVAC ductwork and electrical rough-in in the same room -- both could technically start anytime, but the crews can't physically occupy the same space simultaneously.
 
-- "The electricians can't come until March 15" (Start No Earlier Than)
-- "The inspection must happen on April 1" (Must Start On)
-- "We need framing done by March 20 at the latest" (Finish No Later Than)
+In PMBOK and tools like Primavera P6, this is handled through **resource constraints** or **exclusion links** -- relationships that say "these two tasks must not overlap" without implying a logical sequence. The scheduler then automatically sequences them based on priority or existing dates.
 
-These constraints work **alongside** dependencies -- the scheduler honors whichever is more restrictive.
-
-### Constraint Types
-
-The following constraint types will be supported:
-
-| Constraint | Meaning | Scheduler Behavior |
-|---|---|---|
-| **ASAP** (default) | As Soon As Possible | Start date is fully driven by dependencies |
-| **SNET** | Start No Earlier Than | Start date = max(dependency date, constraint date) |
-| **SNLT** | Start No Later Than | Start date = min(dependency date, constraint date) -- warns if conflict |
-| **MSO** | Must Start On | Start date is locked to the constraint date -- warns if dependency conflict |
-| **MFO** | Must Finish On | End date is locked; start is back-calculated from duration |
-| **FNET** | Finish No Earlier Than | End date = max(calculated end, constraint date) |
-| **FNLT** | Finish No Later Than | End date = min(calculated end, constraint date) -- warns if conflict |
+This is distinct from:
+- **Dependencies** (logical: "B can't start until A finishes because B needs A's output")
+- **Schedule Constraints** (date-based: "B can't start before March 15")
+- **Exclusion Links** (resource/space: "A and B can't happen at the same time")
 
 ### How It Works
 
-When a task has a constraint:
-1. The dependency engine calculates the "ideal" start/end as usual
-2. The constraint is then applied on top:
-   - For "No Earlier Than" types: the task uses whichever date is **later** (dependency or constraint)
-   - For "No Later Than" types: the task uses whichever date is **earlier**, and a warning indicator appears if the constraint conflicts with a dependency
-   - For "Must" types: the constraint date wins unconditionally, with a conflict warning if dependencies disagree
-
-A small constraint icon and date will appear on constrained tasks in the Table and Timeline views so it's visually clear which tasks are manually pinned.
+1. A user opens a task and adds an "exclusion link" to another task (e.g., "Cannot overlap with: Electrical Rough-In")
+2. The link is bidirectional -- it doesn't matter which task you add it from
+3. During scheduling/reconciliation, if two exclusion-linked tasks overlap, the system shifts the one that starts later to begin after the earlier one finishes (FS-style gap)
+4. A distinct visual indicator (crossed-arrows icon) appears on linked tasks in the Table and Timeline views
 
 ### What Changes
 
-**1. Database: Add constraint columns to `tasks` table**
-- `constraint_type` (enum: ASAP, SNET, SNLT, MSO, MFO, FNET, FNLT, default ASAP)
-- `constraint_date` (date, nullable -- only required when type is not ASAP)
+**1. Database: New `task_exclusions` table**
+- `id` (PK), `task_a_id`, `task_b_id` (both reference `tasks.id`)
+- `created_at` timestamp
+- Unique constraint on `(task_a_id, task_b_id)` with a CHECK ensuring `task_a_id < task_b_id` to prevent duplicate/reversed pairs
+- RLS policies mirroring task policies
+- Realtime enabled
 
 **2. Types (`src/types/project.ts`)**
-- Add `ScheduleConstraint` type and config
-- Add `constraintType` and `constraintDate` fields to the `Task` interface
+- Add `exclusionLinks: string[]` to the `Task` interface (list of task IDs this task cannot overlap with)
 
 **3. Data layer (`src/hooks/useProjectData.ts`)**
-- Map the new columns in `buildTaskTree`
-- Update the reconciliation loop to apply constraints after computing the dependency-based start:
-  - ASAP: no change (current behavior)
-  - SNET: `finalStart = max(dependencyStart, constraintDate)`
-  - MSO: `finalStart = constraintDate` (ignore dependency)
-  - MFO: `finalEnd = constraintDate`, back-calculate start from duration
-  - SNLT/FNET/FNLT: apply min/max logic accordingly
-- Preserve duration in all cases
-- Update `updateTask` to persist `constraint_type` and `constraint_date`
+- Fetch `task_exclusions` alongside tasks in `fetchAll`
+- Populate each task's `exclusionLinks` array
+- After dependency + constraint reconciliation, add a second pass that checks all exclusion pairs for date overlap and shifts the later-starting task to begin after the earlier one finishes
+- `updateTask`: when exclusion links change, write to `task_exclusions` table (insert/delete rows)
+- Subscribe to realtime changes on `task_exclusions`
 
 **4. Cascade RPC (`cascade_task_dates`)**
-- Update the PostgreSQL function to read `constraint_type` and `constraint_date` for each successor
-- Apply the constraint logic server-side during cascading
+- Add exclusion-aware logic: after cascading dependency-based dates, check if the resulting dates overlap with any exclusion-linked task and shift accordingly
 
 **5. Task Dialog UI (`src/components/TaskDialog.tsx`)**
-- Add a "Schedule Constraint" section with:
-  - A dropdown for constraint type (defaults to ASAP)
-  - A date picker for the constraint date (shown when type is not ASAP)
-  - A help tooltip explaining each constraint type
-- When ASAP is selected, the constraint date field is hidden
+- Add a "Non-Overlap Links" section below Dependencies:
+  - A list of linked tasks with remove buttons
+  - "Add Non-Overlap Link" button to select a task that cannot overlap
+  - Tasks already linked via dependencies are excluded from the selection (they're already sequenced)
+  - Distinct icon (e.g., `Ban` or `Shuffle` from lucide) to differentiate from dependencies
 
 **6. Task Row (`src/components/TaskRow.tsx`)**
-- Show a small pin/lock icon next to the date for constrained tasks
-- Tooltip shows the constraint type and date
-- If there's a conflict (constraint vs dependency), show a warning indicator
+- Show a small exclusion icon with count when non-overlap links exist
+- Tooltip lists the linked task names
 
 **7. Timeline View (`src/components/TimelineView.tsx`)**
-- Constrained tasks get a small constraint marker (pin icon) on their bar
-- Conflict indicator if the constraint date conflicts with dependencies
+- Exclusion-linked tasks get a subtle visual marker (different from the dependency/critical path indicators)
 
 ### Technical Details
 
 **Migration SQL:**
 ```text
--- Create constraint type enum
-CREATE TYPE schedule_constraint AS ENUM (
-  'ASAP', 'SNET', 'SNLT', 'MSO', 'MFO', 'FNET', 'FNLT'
+CREATE TABLE task_exclusions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_a_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  task_b_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(task_a_id, task_b_id),
+  CHECK(task_a_id < task_b_id)
 );
 
--- Add columns to tasks
-ALTER TABLE tasks
-  ADD COLUMN constraint_type schedule_constraint NOT NULL DEFAULT 'ASAP',
-  ADD COLUMN constraint_date date;
+ALTER TABLE task_exclusions ENABLE ROW LEVEL SECURITY;
+
+-- RLS policies using get_project_id_from_task
+CREATE POLICY "Members can view exclusions"
+  ON task_exclusions FOR SELECT
+  USING (is_project_member(auth.uid(), get_project_id_from_task(task_a_id)));
+
+CREATE POLICY "Editors can insert exclusions"
+  ON task_exclusions FOR INSERT
+  WITH CHECK (is_project_editor(auth.uid(), get_project_id_from_task(task_a_id)));
+
+CREATE POLICY "Editors can delete exclusions"
+  ON task_exclusions FOR DELETE
+  USING (is_project_editor(auth.uid(), get_project_id_from_task(task_a_id)));
+
+ALTER PUBLICATION supabase_realtime ADD TABLE task_exclusions;
 ```
 
-**Reconciliation logic change (pseudocode):**
+**Reconciliation logic (exclusion pass):**
 ```text
-// After computing latestStart from dependencies...
-let finalStart = latestStart || task.startDate;
-let finalEnd = task.endDate;
-
-switch (task.constraintType) {
-  case 'SNET':
-    if (task.constraintDate > finalStart) finalStart = task.constraintDate;
-    // Recalculate end from duration
-    break;
-  case 'MSO':
-    finalStart = task.constraintDate; // Override dependency
-    break;
-  case 'MFO':
-    finalEnd = task.constraintDate;
-    // Back-calculate start from duration
-    break;
-  case 'FNET':
-    if (task.constraintDate > calculatedEnd) finalEnd = task.constraintDate;
-    break;
-  // ... etc
+// After dependency + constraint reconciliation...
+for (const task of allTasksFlat) {
+  for (const linkedId of task.exclusionLinks) {
+    const linked = allTasksFlat.find(t => t.id === linkedId);
+    if (!linked) continue;
+    // Check overlap: tasks overlap if one starts before the other ends
+    if (task.startDate <= linked.endDate && task.endDate >= linked.startDate) {
+      // Shift the later-starting task to after the earlier one finishes
+      if (task.startDate >= linked.startDate) {
+        task.startDate = nextWorkingDay(addDays(parseISO(linked.endDate), 1));
+        task.endDate = addWorkingDays(task.startDate, duration);
+        // Persist the shift
+      }
+    }
+  }
 }
 ```
 
-**Cascade RPC update (key addition):**
+**Cascade RPC update:**
 ```text
--- After computing dependency-based new_s and new_e for a successor:
-SELECT constraint_type, constraint_date INTO v_ct, v_cd FROM tasks WHERE id = succ_id;
-IF v_ct = 'SNET' AND v_cd > new_s THEN
-  new_s := v_cd;
-  new_e := new_s + duration;
-ELSIF v_ct = 'MSO' THEN
-  new_s := v_cd;
-  new_e := new_s + duration;
--- ... other constraint types
-END IF;
+-- After computing final dates for a successor, check exclusion pairs:
+FOR excl IN
+  SELECT CASE WHEN task_a_id = dep.succ_id THEN task_b_id ELSE task_a_id END AS other_id
+  FROM task_exclusions
+  WHERE task_a_id = dep.succ_id OR task_b_id = dep.succ_id
+LOOP
+  SELECT start_date, end_date INTO other_start, other_end
+  FROM tasks WHERE id = excl.other_id;
+  
+  IF final_s <= other_end AND new_e >= other_start THEN
+    -- Overlap detected: shift successor after the other task
+    final_s := next_working_day(other_end + 1, _include_weekends);
+    new_e := add_working_days(final_s, dep_duration, _include_weekends);
+  END IF;
+END LOOP;
 ```
 
 ### Files Changed
-- **1 migration file**: add `schedule_constraint` enum + columns + updated `cascade_task_dates` RPC
-- `src/types/project.ts`: add constraint types and fields
-- `src/hooks/useProjectData.ts`: mapping, reconciliation with constraints, updateTask
-- `src/components/TaskDialog.tsx`: constraint UI (dropdown + date picker)
-- `src/components/TaskRow.tsx`: constraint indicator icon
-- `src/components/TimelineView.tsx`: constraint marker on bars
-- `src/data/mockData.ts`: add default constraint fields
+- **1 migration file**: new `task_exclusions` table + RLS + updated `cascade_task_dates` RPC
+- `src/types/project.ts`: add `exclusionLinks` to `Task` interface
+- `src/hooks/useProjectData.ts`: fetch exclusions, reconciliation pass, CRUD, realtime subscription
+- `src/components/TaskDialog.tsx`: non-overlap links UI section
+- `src/components/TaskRow.tsx`: exclusion indicator icon
+- `src/components/TimelineView.tsx`: exclusion marker on bars
+- `src/data/mockData.ts`: add default `exclusionLinks: []` field
 
 ### What Stays the Same
-- Dependency logic (unchanged -- constraints layer on top)
-- Buffer logic (unchanged)
-- Milestone logic (unchanged)
-- Critical path calculation (unchanged -- constraints just affect the dates fed into it)
-- Resource leveling (unchanged)
-- All RLS policies on existing tables (unchanged)
+- Dependency logic (unchanged -- exclusions are a separate layer)
+- Schedule constraints (unchanged)
+- Buffer and milestone logic (unchanged)
+- Critical path calculation (unchanged)
+- All existing RLS policies (unchanged)
+
