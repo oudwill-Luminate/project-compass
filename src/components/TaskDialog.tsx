@@ -124,13 +124,31 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
     const cleanDeps = (formData.dependencies || []).filter(d => d.predecessorId);
     // Filter out empty exclusion links
     const cleanExclusions = (formData.exclusionLinks || []).filter(id => id);
+
+    // Only include dependencies/exclusions in the update payload if they actually changed
+    const depsChanged = JSON.stringify(cleanDeps) !== JSON.stringify(task.dependencies || []);
+    const exclusionsChanged = JSON.stringify([...cleanExclusions].sort()) !== JSON.stringify([...(task.exclusionLinks || [])].sort());
+
     const cleanedFormData = {
       ...formData,
-      dependencies: cleanDeps,
-      exclusionLinks: cleanExclusions,
-      dependsOn: cleanDeps.length > 0 ? cleanDeps[0].predecessorId : null,
-      dependencyType: cleanDeps.length > 0 ? cleanDeps[0].type : 'FS' as DependencyType,
+      ...(depsChanged
+        ? {
+            dependencies: cleanDeps,
+            dependsOn: cleanDeps.length > 0 ? cleanDeps[0].predecessorId : null,
+            dependencyType: cleanDeps.length > 0 ? cleanDeps[0].type : 'FS' as DependencyType,
+          }
+        : {}),
+      ...(exclusionsChanged ? { exclusionLinks: cleanExclusions } : {}),
     };
+    // Remove dependencies/exclusionLinks keys if they weren't changed so updateTask doesn't trigger rescheduling
+    if (!depsChanged) {
+      delete (cleanedFormData as any).dependencies;
+      delete (cleanedFormData as any).dependsOn;
+      delete (cleanedFormData as any).dependencyType;
+    }
+    if (!exclusionsChanged) {
+      delete (cleanedFormData as any).exclusionLinks;
+    }
 
     if (isNew && onCreateSave) {
       const { id, subTasks, ...rest } = cleanedFormData;
