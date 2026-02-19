@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format, parseISO, addDays, differenceInDays } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare, Diamond } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
@@ -165,6 +165,9 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
             )}
           </button>
         )}
+        {task.isMilestone && (
+          <Diamond className="w-3.5 h-3.5 text-primary shrink-0" fill="currentColor" />
+        )}
         <button
           onClick={() => setEditOpen(true)}
           className="font-medium text-foreground truncate hover:text-primary hover:underline transition-colors text-left"
@@ -252,7 +255,8 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
     cells.push(
       <span key="start" className="text-muted-foreground text-xs flex items-center gap-1">
         {format(parseISO(rolled.startDate), 'MMM dd')}
-        {task.bufferDays > 0 && task.bufferPosition === 'start' && (
+        {task.isMilestone && <Diamond className="w-3 h-3 text-primary" fill="currentColor" />}
+        {!task.isMilestone && task.bufferDays > 0 && task.bufferPosition === 'start' && (
           <span title={`${task.bufferDays}d buffer (start)`}><Shield className="w-3 h-3 text-primary" /></span>
         )}
       </span>
@@ -261,12 +265,16 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
 
   if (show('end')) {
     cells.push(
-      <span key="end" className="text-muted-foreground text-xs flex items-center gap-1">
-        {format(parseISO(rolled.endDate), 'MMM dd')}
-        {task.bufferDays > 0 && task.bufferPosition === 'end' && (
-          <span title={`${task.bufferDays}d buffer (end)`}><Shield className="w-3 h-3 text-primary" /></span>
-        )}
-      </span>
+      task.isMilestone ? (
+        <span key="end" className="text-muted-foreground text-xs">—</span>
+      ) : (
+        <span key="end" className="text-muted-foreground text-xs flex items-center gap-1">
+          {format(parseISO(rolled.endDate), 'MMM dd')}
+          {task.bufferDays > 0 && task.bufferPosition === 'end' && (
+            <span title={`${task.bufferDays}d buffer (end)`}><Shield className="w-3 h-3 text-primary" /></span>
+          )}
+        </span>
+      )
     );
   }
 
@@ -380,6 +388,19 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
             >
               {task.flaggedAsRisk ? 'Remove Risk Flag' : 'Flag as Risk'}
             </DropdownMenuItem>
+            {!hasSubTasks && (
+              <DropdownMenuItem
+                onClick={() => {
+                  const newVal = !task.isMilestone;
+                  const milestoneUpdates: Partial<Task> = { isMilestone: newVal };
+                  if (newVal) milestoneUpdates.endDate = task.startDate;
+                  updateTask(task.id, milestoneUpdates);
+                }}
+              >
+                <Diamond className="w-3.5 h-3.5 mr-2" />
+                {task.isMilestone ? 'Remove Milestone' : 'Mark as Milestone'}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onClick={() => { if (confirm(`Delete "${task.title}"?`)) deleteTask(task.id); }}
               className="text-destructive focus:text-destructive"

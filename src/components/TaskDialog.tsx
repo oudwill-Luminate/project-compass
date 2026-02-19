@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
-import { CalendarIcon, AlertTriangle, Info } from 'lucide-react';
+import { CalendarIcon, AlertTriangle, Info, Diamond } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { TaskChecklist, ChecklistItem } from '@/components/TaskChecklist';
 import { supabase } from '@/integrations/supabase/client';
@@ -149,6 +149,31 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
             />
           </div>
 
+          {/* Milestone Toggle - only for leaf tasks */}
+          {!(task.subTasks && task.subTasks.length > 0) && (
+            <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Diamond className="w-4 h-4 text-primary" fill="currentColor" />
+                <div>
+                  <Label className="text-xs font-medium">Milestone</Label>
+                  {formData.isMilestone && (
+                    <p className="text-[11px] text-muted-foreground">Zero-duration checkpoint</p>
+                  )}
+                </div>
+              </div>
+              <Switch
+                checked={formData.isMilestone}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setFormData({ ...formData, isMilestone: true, endDate: formData.startDate });
+                  } else {
+                    setFormData({ ...formData, isMilestone: false });
+                  }
+                }}
+              />
+            </div>
+          )}
+
           {/* Status & Priority */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -273,7 +298,31 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                 </p>
               </div>
             );
-          })() : (
+          })() : formData.isMilestone ? (
+          <div>
+            <Label className="text-xs font-medium">Milestone Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className={cn("w-full justify-start text-left font-normal mt-1 text-xs")}>
+                  <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                  {format(parseISO(formData.startDate), 'MMM dd, yyyy')}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={parseISO(formData.startDate)}
+                  onSelect={date => {
+                    if (!date) return;
+                    const d = format(date, 'yyyy-MM-dd');
+                    setFormData({ ...formData, startDate: d, endDate: d });
+                  }}
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+          ) : (
           <div className="grid grid-cols-3 gap-3">
             <div>
               <Label className="text-xs font-medium">Expected Start</Label>
