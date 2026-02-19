@@ -822,7 +822,6 @@ export function useProjectData(projectId: string | undefined) {
           const updatedParentSubs = parentTask.subTasks.map(s =>
             s.id === taskId ? { ...s, ...updates } : s
           );
-          // Compute parent's actual rolled-up dates (min start, max end) without buffer
           const subStarts = updatedParentSubs.map(s => s.startDate);
           const subEnds = updatedParentSubs.map(s => s.endDate);
           const parentStart = subStarts.reduce((min, d) => d < min ? d : min, subStarts[0]);
@@ -833,6 +832,21 @@ export function useProjectData(projectId: string | undefined) {
             _new_end: parentEnd,
             _include_weekends: project.includeWeekends,
           });
+        }
+      }
+
+      // Also cascade exclusion-linked tasks so they get re-evaluated
+      if (oldTask.exclusionLinks && oldTask.exclusionLinks.length > 0) {
+        for (const linkedId of oldTask.exclusionLinks) {
+          const linkedRes = await supabase.from('tasks').select('start_date, end_date').eq('id', linkedId).single();
+          if (linkedRes.data) {
+            await supabase.rpc('cascade_task_dates', {
+              _task_id: linkedId,
+              _new_start: linkedRes.data.start_date,
+              _new_end: linkedRes.data.end_date,
+              _include_weekends: project.includeWeekends,
+            });
+          }
         }
       }
     }
