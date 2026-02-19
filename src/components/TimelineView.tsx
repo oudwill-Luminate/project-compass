@@ -6,10 +6,13 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin, Ban, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin, Ban, ZoomIn, ZoomOut, RotateCcw, CalendarIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Task, STATUS_CONFIG, CONSTRAINT_CONFIG } from '@/types/project';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 
 function TaskTimelineRow({
   task,
@@ -272,6 +275,8 @@ export function TimelineView() {
   const { project, criticalTaskIds, slackDays } = useProject();
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [rangeStart, setRangeStart] = useState<Date | undefined>();
+  const [rangeEnd, setRangeEnd] = useState<Date | undefined>();
 
   const zoomIn = () => setZoomLevel(prev => Math.min(prev + 0.25, 4));
   const zoomOut = () => setZoomLevel(prev => Math.max(prev - 0.25, 0.25));
@@ -301,14 +306,23 @@ export function TimelineView() {
   // Critical path & slack from context (already computed)
 
   const { timelineStart, totalDays, weeks } = useMemo(() => {
-    if (allTasks.length === 0) {
+    if (allTasks.length === 0 && !rangeStart && !rangeEnd) {
       const now = new Date();
       return { timelineStart: now, totalDays: 30, weeks: [] as Date[] };
     }
 
-    const dates = allTasks.flatMap(t => [parseISO(t.startDate), parseISO(t.endDate)]);
-    const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
-    const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+    let minDate: Date, maxDate: Date;
+
+    if (rangeStart && rangeEnd) {
+      minDate = rangeStart;
+      maxDate = rangeEnd;
+    } else {
+      const dates = allTasks.flatMap(t => [parseISO(t.startDate), parseISO(t.endDate)]);
+      const autoMin = new Date(Math.min(...dates.map(d => d.getTime())));
+      const autoMax = new Date(Math.max(...dates.map(d => d.getTime())));
+      minDate = rangeStart || autoMin;
+      maxDate = rangeEnd || autoMax;
+    }
 
     const start = addDays(startOfWeek(minDate), -7);
     const end = addDays(endOfWeek(maxDate), 7);
@@ -316,7 +330,7 @@ export function TimelineView() {
     const weeksList = eachWeekOfInterval({ start, end });
 
     return { timelineStart: start, totalDays: total, weeks: weeksList };
-  }, [allTasks]);
+  }, [allTasks, rangeStart, rangeEnd]);
 
   const today = new Date();
   const todayPercent = (differenceInDays(today, timelineStart) / totalDays) * 100;
@@ -335,6 +349,50 @@ export function TimelineView() {
           <p className="text-sm text-muted-foreground mt-1">Visual project roadmap</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Date range pickers */}
+          <div className="flex items-center gap-1.5">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className={cn("h-8 text-xs gap-1.5 font-normal", !rangeStart && "text-muted-foreground")}>
+                  <CalendarIcon className="w-3.5 h-3.5" />
+                  {rangeStart ? format(rangeStart, 'MMM dd, yyyy') : 'From'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={rangeStart}
+                  onSelect={setRangeStart}
+                  initialFocus
+                  className={cn("p-3 pointer-events-auto")}
+                />
+              </PopoverContent>
+            </Popover>
+            <span className="text-xs text-muted-foreground">–</span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className={cn("h-8 text-xs gap-1.5 font-normal", !rangeEnd && "text-muted-foreground")}>
+                  <CalendarIcon className="w-3.5 h-3.5" />
+                  {rangeEnd ? format(rangeEnd, 'MMM dd, yyyy') : 'To'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={rangeEnd}
+                  onSelect={setRangeEnd}
+                  initialFocus
+                  className={cn("p-3 pointer-events-auto")}
+                />
+              </PopoverContent>
+            </Popover>
+            {(rangeStart || rangeEnd) && (
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setRangeStart(undefined); setRangeEnd(undefined); }}>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </div>
+          {/* Zoom controls */}
           <div className="flex items-center gap-1 border rounded-lg p-1">
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomOut} disabled={zoomLevel <= 0.25}>
               <ZoomOut className="w-3.5 h-3.5" />
