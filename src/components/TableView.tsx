@@ -102,6 +102,7 @@ export function TableView() {
     isMilestone: false,
     constraintType: 'ASAP',
     constraintDate: null,
+    exclusionLinks: [],
     subTasks: [],
   };
 

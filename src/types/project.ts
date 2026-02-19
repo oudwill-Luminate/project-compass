@@ -45,6 +45,7 @@ export interface Task {
   realizedCost: number;
   constraintType: ScheduleConstraintType;
   constraintDate: string | null;
+  exclusionLinks: string[]; // IDs of tasks that cannot overlap with this one
   subTasks: Task[];
 }
 

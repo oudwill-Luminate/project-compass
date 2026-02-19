@@ -509,6 +509,42 @@ export type Database = {
           },
         ]
       }
+      task_exclusions: {
+        Row: {
+          created_at: string
+          id: string
+          task_a_id: string
+          task_b_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          task_a_id: string
+          task_b_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          task_a_id?: string
+          task_b_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_exclusions_task_a_id_fkey"
+            columns: ["task_a_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_exclusions_task_b_id_fkey"
+            columns: ["task_b_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           actual_cost: number

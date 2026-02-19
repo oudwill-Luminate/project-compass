@@ -55,7 +55,7 @@ interface TaskRow {
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
 
-function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRow>, depMap?: Map<string, TaskDependency[]>): Task[] {
+function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRow>, depMap?: Map<string, TaskDependency[]>, exclMap?: Map<string, string[]>): Task[] {
   const taskMap = new Map<string, Task>();
 
   // First pass: create all tasks
@@ -94,6 +94,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       realizedCost: Number(t.realized_cost) || 0,
       constraintType: ((t as any).constraint_type || 'ASAP') as ScheduleConstraintType,
       constraintDate: (t as any).constraint_date || null,
+      exclusionLinks: exclMap?.get(t.id) || [],
       subTasks: [],
     });
   }
@@ -366,16 +367,34 @@ export function useProjectData(projectId: string | undefined) {
     // Fetch task dependencies from junction table
     const taskIds = taskRows.map(t => t.id);
     const depMap = new Map<string, TaskDependency[]>();
+    const exclMap = new Map<string, string[]>(); // task_id -> list of excluded task IDs
     if (taskIds.length > 0) {
-      const { data: depData } = await supabase
-        .from('task_dependencies' as any)
-        .select('task_id, predecessor_id, dependency_type')
-        .in('task_id', taskIds);
-      if (depData) {
-        for (const row of depData as any[]) {
+      const [depRes, exclRes] = await Promise.all([
+        supabase
+          .from('task_dependencies' as any)
+          .select('task_id, predecessor_id, dependency_type')
+          .in('task_id', taskIds),
+        supabase
+          .from('task_exclusions' as any)
+          .select('task_a_id, task_b_id')
+          .or(`task_a_id.in.(${taskIds.join(',')}),task_b_id.in.(${taskIds.join(',')})`)
+      ]);
+      if (depRes.data) {
+        for (const row of depRes.data as any[]) {
           const existing = depMap.get(row.task_id) || [];
           existing.push({ predecessorId: row.predecessor_id, type: row.dependency_type as DependencyType });
           depMap.set(row.task_id, existing);
+        }
+      }
+      if (exclRes.data) {
+        for (const row of exclRes.data as any[]) {
+          // Bidirectional: add to both sides
+          const aList = exclMap.get(row.task_a_id) || [];
+          aList.push(row.task_b_id);
+          exclMap.set(row.task_a_id, aList);
+          const bList = exclMap.get(row.task_b_id) || [];
+          bList.push(row.task_a_id);
+          exclMap.set(row.task_b_id, bList);
         }
       }
     }
@@ -404,7 +423,7 @@ export function useProjectData(projectId: string | undefined) {
       description: b.description || '',
       ownerId: b.owner_id || null,
       collapsed: false,
-      tasks: buildTaskTree(taskRows.filter(t => t.bucket_id === b.id), profileMap, depMap),
+      tasks: buildTaskTree(taskRows.filter(t => t.bucket_id === b.id), profileMap, depMap, exclMap),
     }));
 
     const proj: Project = {
@@ -494,6 +513,34 @@ export function useProjectData(projectId: string | undefined) {
       }
     }
 
+    // Exclusion pass: shift later-starting tasks to avoid overlap with exclusion-linked tasks
+    const processed = new Set<string>();
+    for (const task of allTasksFlat) {
+      if (task.exclusionLinks.length === 0) continue;
+      for (const linkedId of task.exclusionLinks) {
+        const pairKey = [task.id, linkedId].sort().join('-');
+        if (processed.has(pairKey)) continue;
+        processed.add(pairKey);
+        const linked = allTasksFlat.find(t => t.id === linkedId);
+        if (!linked) continue;
+        // Check overlap
+        if (task.startDate <= linked.endDate && task.endDate >= linked.startDate) {
+          // Shift the later-starting task
+          const laterTask = task.startDate >= linked.startDate ? task : linked;
+          const earlierTask = laterTask === task ? linked : task;
+          const laterDuration = workingDaysDiff(parseISO(laterTask.startDate), parseISO(laterTask.endDate), includeWeekends);
+          const newStart = nextWorkingDay(addDays(parseISO(earlierTask.endDate), 1), includeWeekends);
+          const newEnd = addWorkingDays(newStart, laterDuration, includeWeekends);
+          laterTask.startDate = format(newStart, 'yyyy-MM-dd');
+          laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
+          supabase.from('tasks').update({
+            start_date: laterTask.startDate,
+            end_date: laterTask.endDate,
+          }).eq('id', laterTask.id).then(() => {});
+        }
+      }
+    }
+
     setMembers(memberRows.map((m: any) => ({
       id: m.id,
       user_id: m.user_id,
@@ -516,6 +563,7 @@ export function useProjectData(projectId: string | undefined) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'buckets', filter: `project_id=eq.${projectId}` }, () => fetchAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => fetchAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_dependencies' }, () => fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_exclusions' }, () => fetchAll())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -586,6 +634,7 @@ export function useProjectData(projectId: string | undefined) {
                 isMilestone: (predRow as any).is_milestone || false,
                 constraintType: ((predRow as any).constraint_type || 'ASAP') as ScheduleConstraintType,
                 constraintDate: (predRow as any).constraint_date || null,
+                exclusionLinks: [],
                 subTasks: [],
               };
             }
@@ -640,6 +689,27 @@ export function useProjectData(projectId: string | undefined) {
         // Also sync legacy columns for backward compat
         updates.dependsOn = newDeps.length > 0 ? newDeps[0].predecessorId : null;
         updates.dependencyType = newDeps.length > 0 ? newDeps[0].type : 'FS';
+      }
+    }
+
+    // Handle exclusion links changes
+    if (updates.exclusionLinks !== undefined) {
+      const oldExclusions = oldTask.exclusionLinks || [];
+      const newExclusions = updates.exclusionLinks;
+      
+      // Delete removed exclusions
+      const removed = oldExclusions.filter(id => !newExclusions.includes(id));
+      for (const otherId of removed) {
+        const [a, b] = [taskId, otherId].sort();
+        await supabase.from('task_exclusions' as any).delete()
+          .eq('task_a_id', a).eq('task_b_id', b);
+      }
+      
+      // Insert new exclusions
+      const added = newExclusions.filter(id => !oldExclusions.includes(id));
+      for (const otherId of added) {
+        const [a, b] = [taskId, otherId].sort();
+        await supabase.from('task_exclusions' as any).insert({ task_a_id: a, task_b_id: b });
       }
     }
 
@@ -895,6 +965,7 @@ export function useProjectData(projectId: string | undefined) {
       realizedCost: 0,
       constraintType: 'ASAP',
       constraintDate: null,
+      exclusionLinks: [],
       subTasks: [],
     };
 

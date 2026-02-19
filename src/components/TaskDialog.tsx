@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO, differenceInDays, addDays } from 'date-fns';
-import { CalendarIcon, AlertTriangle, Info, Diamond, Plus, X, Pin, HelpCircle } from 'lucide-react';
+import { CalendarIcon, AlertTriangle, Info, Diamond, Plus, X, Pin, HelpCircle, Ban } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { TaskChecklist, ChecklistItem } from '@/components/TaskChecklist';
 import { supabase } from '@/integrations/supabase/client';
@@ -122,9 +122,12 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
 
     // Filter out empty dependency rows
     const cleanDeps = (formData.dependencies || []).filter(d => d.predecessorId);
+    // Filter out empty exclusion links
+    const cleanExclusions = (formData.exclusionLinks || []).filter(id => id);
     const cleanedFormData = {
       ...formData,
       dependencies: cleanDeps,
+      exclusionLinks: cleanExclusions,
       dependsOn: cleanDeps.length > 0 ? cleanDeps[0].predecessorId : null,
       dependencyType: cleanDeps.length > 0 ? cleanDeps[0].type : 'FS' as DependencyType,
     };
@@ -534,6 +537,85 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
                 </button>
               </div>
             ))}
+          </div>
+
+          {/* Non-Overlap (Exclusion) Links */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Ban className="w-4 h-4 text-orange-500" />
+                <Label className="text-xs font-medium">Non-Overlap Links</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[280px] text-xs">
+                      Tasks linked here cannot run at the same time (e.g. shared space or crew constraints). The scheduler will automatically sequence them.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs gap-1"
+                onClick={() => {
+                  setFormData(prev => ({
+                    ...prev,
+                    exclusionLinks: [...(prev.exclusionLinks || []), ''],
+                  }));
+                }}
+              >
+                <Plus className="w-3 h-3" /> Add
+              </Button>
+            </div>
+            {(formData.exclusionLinks || []).length === 0 && (
+              <p className="text-xs text-muted-foreground">No non-overlap links. Click "Add" to prevent overlap with another task.</p>
+            )}
+            {(formData.exclusionLinks || []).map((linkedId, idx) => {
+              // Filter out: self, already-linked tasks, and dependency predecessors (already sequenced)
+              const depPredIds = new Set((formData.dependencies || []).map(d => d.predecessorId));
+              const alreadyLinked = new Set((formData.exclusionLinks || []).filter((_, i) => i !== idx));
+              const available = otherTasks.filter(t => 
+                !depPredIds.has(t.id) && !alreadyLinked.has(t.id)
+              );
+              return (
+                <div key={idx} className="grid grid-cols-[1fr_28px] gap-2 items-center">
+                  <Select
+                    value={linkedId || 'none'}
+                    onValueChange={v => {
+                      const newId = v === 'none' ? '' : v;
+                      setFormData(prev => ({
+                        ...prev,
+                        exclusionLinks: prev.exclusionLinks.map((id, i) => i === idx ? newId : id),
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="text-xs h-8"><SelectValue placeholder="Select task..." /></SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      <SelectItem value="none">None</SelectItem>
+                      {available.map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button
+                    type="button"
+                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                    onClick={() => {
+                      setFormData(prev => ({
+                        ...prev,
+                        exclusionLinks: prev.exclusionLinks.filter((_, i) => i !== idx),
+                      }));
+                    }}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           {/* Schedule Constraint */}
