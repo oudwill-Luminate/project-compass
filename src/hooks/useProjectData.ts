@@ -464,15 +464,20 @@ export function useProjectData(projectId: string | undefined) {
         parseISO(task.startDate), parseISO(task.endDate), includeWeekends
       );
 
-      // Only shift if the task's current start violates the dependency (starts too early)
+      // Shift if dependency is violated OR if ASAP task can start earlier
       let finalStart = task.startDate;
       let finalEnd = task.endDate;
-      if (latestStart && task.startDate < latestStart) {
-        finalStart = latestStart;
-        finalEnd = format(
-          addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
-          'yyyy-MM-dd'
-        );
+      if (latestStart) {
+        const shouldShift =
+          task.startDate < latestStart ||  // too early (existing logic)
+          (task.constraintType === 'ASAP' && task.startDate > latestStart);  // too late — pull forward
+        if (shouldShift) {
+          finalStart = latestStart;
+          finalEnd = format(
+            addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
+            'yyyy-MM-dd'
+          );
+        }
       }
 
       // Apply schedule constraint — only override when actually violated
@@ -523,13 +528,23 @@ export function useProjectData(projectId: string | undefined) {
         processed.add(pairKey);
         const linked = allTasksFlat.find(t => t.id === linkedId);
         if (!linked) continue;
-        // Check overlap
-        if (task.startDate <= linked.endDate && task.endDate >= linked.startDate) {
+        // Check overlap using effective end dates (including buffers)
+        const taskEffEnd = task.bufferDays > 0 && task.bufferPosition === 'end'
+          ? format(addWorkingDays(parseISO(task.endDate), task.bufferDays, includeWeekends), 'yyyy-MM-dd')
+          : task.endDate;
+        const linkedEffEnd = linked.bufferDays > 0 && linked.bufferPosition === 'end'
+          ? format(addWorkingDays(parseISO(linked.endDate), linked.bufferDays, includeWeekends), 'yyyy-MM-dd')
+          : linked.endDate;
+        if (task.startDate <= linkedEffEnd && taskEffEnd >= linked.startDate) {
           // Shift the later-starting task
           const laterTask = task.startDate >= linked.startDate ? task : linked;
           const earlierTask = laterTask === task ? linked : task;
           const laterDuration = workingDaysDiff(parseISO(laterTask.startDate), parseISO(laterTask.endDate), includeWeekends);
-          const newStart = nextWorkingDay(addDays(parseISO(earlierTask.endDate), 1), includeWeekends);
+          // Use earlier task's effective end (with buffer) for shift calculation
+          const earlierEffEnd = earlierTask.bufferDays > 0 && earlierTask.bufferPosition === 'end'
+            ? addWorkingDays(parseISO(earlierTask.endDate), earlierTask.bufferDays, includeWeekends)
+            : parseISO(earlierTask.endDate);
+          const newStart = nextWorkingDay(addDays(earlierEffEnd, 1), includeWeekends);
           const newEnd = addWorkingDays(newStart, laterDuration, includeWeekends);
           laterTask.startDate = format(newStart, 'yyyy-MM-dd');
           laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
