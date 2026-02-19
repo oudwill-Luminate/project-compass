@@ -62,7 +62,7 @@ interface TaskDialogProps {
 }
 
 export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: TaskDialogProps) {
-  const { updateTask, getAllTasks, members } = useProject();
+  const { updateTask, getAllTasks, members, project } = useProject();
   const [formData, setFormData] = useState<Task>({ ...task });
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
 
@@ -91,9 +91,19 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
 
   const duration = useMemo(() => {
     try {
-      return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate)) + 1;
+      if (project.includeWeekends) {
+        return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate)) + 1;
+      }
+      let count = 0;
+      let d = parseISO(formData.startDate);
+      const end = parseISO(formData.endDate);
+      while (d <= end) {
+        if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+        d = addDays(d, 1);
+      }
+      return Math.max(count, 1);
     } catch { return 1; }
-  }, [formData.startDate, formData.endDate]);
+  }, [formData.startDate, formData.endDate, project.includeWeekends]);
 
   const [durationInput, setDurationInput] = useState<string>('');
 
@@ -105,8 +115,18 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
     setDurationInput(val);
     const days = parseInt(val, 10);
     if (!isNaN(days) && days > 0) {
-      const newEnd = format(addDays(parseISO(formData.startDate), days - 1), 'yyyy-MM-dd');
-      setFormData(prev => ({ ...prev, endDate: newEnd }));
+      let newEnd: Date;
+      if (project.includeWeekends) {
+        newEnd = addDays(parseISO(formData.startDate), days - 1);
+      } else {
+        let remaining = days - 1;
+        newEnd = parseISO(formData.startDate);
+        while (remaining > 0) {
+          newEnd = addDays(newEnd, 1);
+          if (newEnd.getDay() !== 0 && newEnd.getDay() !== 6) remaining--;
+        }
+      }
+      setFormData(prev => ({ ...prev, endDate: format(newEnd, 'yyyy-MM-dd') }));
     }
   };
 
@@ -299,7 +319,18 @@ export function TaskDialog({ task, open, onOpenChange, isNew, onCreateSave }: Ta
             });
             const rolledStart = effectiveDates.reduce((min, d) => d.s < min ? d.s : min, effectiveDates[0].s);
             const rolledEnd = effectiveDates.reduce((max, d) => d.e > max ? d.e : max, effectiveDates[0].e);
-            const rolledDuration = differenceInDays(parseISO(rolledEnd), parseISO(rolledStart)) + 1;
+            const rolledDuration = project.includeWeekends
+              ? differenceInDays(parseISO(rolledEnd), parseISO(rolledStart)) + 1
+              : (() => {
+                  let count = 0;
+                  let d = parseISO(rolledStart);
+                  const end = parseISO(rolledEnd);
+                  while (d <= end) {
+                    if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+                    d = addDays(d, 1);
+                  }
+                  return Math.max(count, 1);
+                })();
             return (
               <div className="space-y-2">
                 <div className="grid grid-cols-3 gap-3">
