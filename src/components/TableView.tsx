@@ -100,6 +100,8 @@ export function TableView() {
     baselineEndDate: null,
     realizedCost: 0,
     isMilestone: false,
+    constraintType: 'ASAP',
+    constraintDate: null,
     subTasks: [],
   };
 

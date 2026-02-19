@@ -6,8 +6,8 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { ChevronRight, ChevronDown, Shield, AlertTriangle } from 'lucide-react';
-import { Task, STATUS_CONFIG } from '@/types/project';
+import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin } from 'lucide-react';
+import { Task, STATUS_CONFIG, CONSTRAINT_CONFIG } from '@/types/project';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
 function TaskTimelineRow({
@@ -133,7 +133,22 @@ function TaskTimelineRow({
                 title={`${task.title}: ${format(parseISO(displayStart), 'MMM dd')} – ${format(parseISO(displayEnd), 'MMM dd')}${showProgress ? ` (${prog}%)` : ''}${task.bufferDays > 0 ? ` (+${task.bufferDays}d buffer ${task.bufferPosition})` : ''}`}
               >
                 <span className="absolute inset-0 flex items-center justify-between px-2 text-[11px] text-white font-medium truncate">
-                  <span className="truncate">{task.title}</span>
+                  <span className="truncate flex items-center gap-1">
+                    {task.constraintType && task.constraintType !== 'ASAP' && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Pin className="w-3 h-3 shrink-0 text-white/80" />
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">
+                            {task.constraintType}: {CONSTRAINT_CONFIG[task.constraintType].label}
+                            {task.constraintDate && ` (${format(parseISO(task.constraintDate), 'MMM dd')})`}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                    {task.title}
+                  </span>
                   {showProgress && <span className="shrink-0 ml-1 opacity-90">{prog}%</span>}
                 </span>
               </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Project, Bucket, Task, Owner, DependencyType, TaskStatus, TaskPriority, TaskDependency } from '@/types/project';
+import { Project, Bucket, Task, Owner, DependencyType, TaskStatus, TaskPriority, TaskDependency, ScheduleConstraintType } from '@/types/project';
 import { useAuth } from '@/context/AuthContext';
 import { differenceInDays, parseISO, addDays, format } from 'date-fns';
 import { toast } from 'sonner';
@@ -92,6 +92,8 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       baselineStartDate: t.baseline_start_date || null,
       baselineEndDate: t.baseline_end_date || null,
       realizedCost: Number(t.realized_cost) || 0,
+      constraintType: ((t as any).constraint_type || 'ASAP') as ScheduleConstraintType,
+      constraintDate: (t as any).constraint_date || null,
       subTasks: [],
     });
   }
@@ -416,42 +418,78 @@ export function useProjectData(projectId: string | undefined) {
 
     setProject(proj);
 
-    // Reconcile: fix dependent tasks using ALL dependencies (most restrictive start)
+    // Reconcile: fix dependent tasks using ALL dependencies (most restrictive start) + constraints
     const allTasksFlat = buckets.flatMap(b => flattenTasks(b.tasks));
     const includeWeekends = projData.include_weekends ?? false;
     for (const task of allTasksFlat) {
       const deps = task.dependencies.length > 0 ? task.dependencies : (task.dependsOn ? [{ predecessorId: task.dependsOn, type: task.dependencyType }] : []);
-      if (deps.length === 0) continue;
 
       // Compute the most restrictive (latest) start from all predecessors
       let latestStart: string | null = null;
-      for (const dep of deps) {
-        const pred = allTasksFlat.find(t => t.id === dep.predecessorId);
-        if (!pred) continue;
-        const eff = getEffectiveDates(pred);
-        const scheduled = scheduleTask(
-          { ...pred, startDate: eff.startDate, endDate: eff.endDate },
-          task,
-          dep.type,
-          includeWeekends
-        );
-        if (!latestStart || scheduled.startDate > latestStart) {
-          latestStart = scheduled.startDate;
+      if (deps.length > 0) {
+        for (const dep of deps) {
+          const pred = allTasksFlat.find(t => t.id === dep.predecessorId);
+          if (!pred) continue;
+          const eff = getEffectiveDates(pred);
+          const scheduled = scheduleTask(
+            { ...pred, startDate: eff.startDate, endDate: eff.endDate },
+            task,
+            dep.type,
+            includeWeekends
+          );
+          if (!latestStart || scheduled.startDate > latestStart) {
+            latestStart = scheduled.startDate;
+          }
         }
       }
 
-      // Only reconcile the START date; preserve the user's duration
-      if (latestStart && latestStart !== task.startDate) {
-        const currentDuration = workingDaysDiff(
-          parseISO(task.startDate), parseISO(task.endDate), includeWeekends
-        );
-        const newEnd = format(
-          addWorkingDays(parseISO(latestStart), currentDuration, includeWeekends),
-          'yyyy-MM-dd'
-        );
+      let finalStart = latestStart || task.startDate;
+      const currentDuration = workingDaysDiff(
+        parseISO(task.startDate), parseISO(task.endDate), includeWeekends
+      );
+      let finalEnd = format(
+        addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
+        'yyyy-MM-dd'
+      );
+
+      // Apply schedule constraint on top
+      if (task.constraintType !== 'ASAP' && task.constraintDate) {
+        const cd = task.constraintDate;
+        switch (task.constraintType) {
+          case 'SNET':
+            if (cd > finalStart) {
+              finalStart = cd;
+              finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
+            }
+            break;
+          case 'SNLT':
+            if (cd < finalStart) {
+              finalStart = cd;
+              finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
+            }
+            break;
+          case 'MSO':
+            finalStart = cd;
+            finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
+            break;
+          case 'MFO':
+            finalEnd = cd;
+            finalStart = format(addWorkingDays(parseISO(cd), -currentDuration, includeWeekends), 'yyyy-MM-dd');
+            break;
+          case 'FNET':
+            if (cd > finalEnd) finalEnd = cd;
+            break;
+          case 'FNLT':
+            if (cd < finalEnd) finalEnd = cd;
+            break;
+        }
+      }
+
+      // Only reconcile if dates actually changed
+      if (finalStart !== task.startDate || finalEnd !== task.endDate) {
         supabase.from('tasks').update({
-          start_date: latestStart,
-          end_date: newEnd,
+          start_date: finalStart,
+          end_date: finalEnd,
         }).eq('id', task.id).then(() => {});
       }
     }
@@ -546,6 +584,8 @@ export function useProjectData(projectId: string | undefined) {
                 baselineStartDate: predRow.baseline_start_date, baselineEndDate: predRow.baseline_end_date,
                 realizedCost: predRow.realized_cost,
                 isMilestone: (predRow as any).is_milestone || false,
+                constraintType: ((predRow as any).constraint_type || 'ASAP') as ScheduleConstraintType,
+                constraintDate: (predRow as any).constraint_date || null,
                 subTasks: [],
               };
             }
@@ -640,6 +680,8 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.baselineEndDate !== undefined) dbUpdates.baseline_end_date = updates.baselineEndDate;
     if (updates.realizedCost !== undefined) dbUpdates.realized_cost = updates.realizedCost;
     if (updates.owner !== undefined) dbUpdates.owner_id = updates.owner.id === 'unknown' ? null : updates.owner.id;
+    if (updates.constraintType !== undefined) dbUpdates.constraint_type = updates.constraintType;
+    if (updates.constraintDate !== undefined) dbUpdates.constraint_date = updates.constraintDate;
 
     await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
 
@@ -851,6 +893,8 @@ export function useProjectData(projectId: string | undefined) {
       baselineStartDate: null,
       baselineEndDate: null,
       realizedCost: 0,
+      constraintType: 'ASAP',
+      constraintDate: null,
       subTasks: [],
     };
 
