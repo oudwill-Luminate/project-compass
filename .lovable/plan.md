@@ -1,75 +1,99 @@
 
 
-## Fix: Cascade RPC Overwriting Task Dates With Buffer-Extended Values
+## Fix: TaskDialog Duration Ignores Weekend Exclusion
 
 ### Root Cause
 
-When you save a task with buffer days (like "Ductwork Distribution" which has a 2-day end buffer), the system:
+The TaskDialog calculates and displays duration using **calendar days** (`differenceInDays + 1`), completely ignoring the project's "Include Weekends" setting. When weekends are excluded:
 
-1. Correctly saves your new duration to the database
-2. Then calls the scheduling cascade function to update dependent tasks
-3. But it passes buffer-extended dates to that function (your end date + 2 buffer days)
-4. The cascade function's first action is to overwrite the task's own dates with what it received -- so it replaces your intended end date with one that's 2 days longer
-5. This triggers a data refresh, and you see the old (longer) duration
+- A task from May 8 (Fri) to May 12 (Tue) shows as **5 days** (calendar), but is actually **3 working days** (Fri, Mon, Tue)
+- When the user types "5" in the duration field, it computes `May 8 + 4 calendar days = May 12`, which is only 3 working days -- not 5
 
-The scheduling cascade function already handles buffer internally when calculating dependent tasks. By pre-computing the buffer and passing it in, the buffer gets applied twice and the task's own dates get corrupted.
+The same mismatch exists in the scheduling engine (both JS and SQL), which uses `working_days_diff` (non-inclusive of start day). So the cascade RPC sees the task as having 2 working-day duration, preserves that, and the dates never match what the user intended.
 
 ### The Fix
 
-Pass the task's actual dates (not buffer-extended dates) to the cascade function. The cascade function already reads buffer settings from the database and accounts for them when scheduling dependent tasks.
+Make the TaskDialog respect `includeWeekends` in three places:
 
-### Technical Details
+**File: `src/components/TaskDialog.tsx`**
 
-**File: `src/hooks/useProjectData.ts` (~lines 807-822)**
+1. **Pull `project` from context** (line 65):
+   ```text
+   const { updateTask, getAllTasks, members, project } = useProject();
+   ```
 
-Current code computes effective (buffer-extended) dates and passes them to the cascade:
+2. **Duration display** (line 92-96) -- count working days when weekends are excluded:
+   ```text
+   const duration = useMemo(() => {
+     try {
+       if (project.includeWeekends) {
+         return differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate)) + 1;
+       }
+       // Count only working days (inclusive of start and end)
+       let count = 0;
+       let d = parseISO(formData.startDate);
+       const end = parseISO(formData.endDate);
+       while (d <= end) {
+         if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+         d = addDays(d, 1);
+       }
+       return Math.max(count, 1);
+     } catch { return 1; }
+   }, [formData.startDate, formData.endDate, project.includeWeekends]);
+   ```
 
-```text
-// BEFORE (bug: passes buffer-extended dates, RPC overwrites task with them):
-const effectiveEnd = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'end'
-  ? format(addWorkingDays(...), 'yyyy-MM-dd')
-  : updatedTask.endDate;
-const effectiveStart = updatedTask.bufferDays > 0 && updatedTask.bufferPosition === 'start'
-  ? format(addWorkingDays(...), 'yyyy-MM-dd')
-  : updatedTask.startDate;
+3. **Duration change handler** (line 104-111) -- add working days when setting end date:
+   ```text
+   const handleDurationChange = (val: string) => {
+     setDurationInput(val);
+     const days = parseInt(val, 10);
+     if (!isNaN(days) && days > 0) {
+       let newEnd: Date;
+       if (project.includeWeekends) {
+         newEnd = addDays(parseISO(formData.startDate), days - 1);
+       } else {
+         // Add (days - 1) working days from start
+         let remaining = days - 1; // start day counts as day 1
+         newEnd = parseISO(formData.startDate);
+         while (remaining > 0) {
+           newEnd = addDays(newEnd, 1);
+           if (newEnd.getDay() !== 0 && newEnd.getDay() !== 6) remaining--;
+         }
+       }
+       setFormData(prev => ({ ...prev, endDate: format(newEnd, 'yyyy-MM-dd') }));
+     }
+   };
+   ```
 
-await supabase.rpc('cascade_task_dates', {
-  _task_id: taskId,
-  _new_start: effectiveStart,
-  _new_end: effectiveEnd,
-  ...
-});
-```
+4. **Rolled-up parent duration** (line 302) -- also use working days for parent tasks:
+   ```text
+   const rolledDuration = project.includeWeekends
+     ? differenceInDays(parseISO(rolledEnd), parseISO(rolledStart)) + 1
+     : (() => {
+         let count = 0;
+         let d = parseISO(rolledStart);
+         const end = parseISO(rolledEnd);
+         while (d <= end) {
+           if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+           d = addDays(d, 1);
+         }
+         return Math.max(count, 1);
+       })();
+   ```
 
-Fix: pass the actual task dates instead:
+### Result
 
-```text
-// AFTER (fixed: pass actual dates, RPC handles buffer internally):
-await supabase.rpc('cascade_task_dates', {
-  _task_id: taskId,
-  _new_start: updatedTask.startDate,
-  _new_end: updatedTask.endDate,
-  _include_weekends: project.includeWeekends,
-});
-```
-
-The same fix applies to the parent-task cascade call (~lines 835-840), which should also pass the parent's actual rolled-up dates without pre-applying buffer.
-
-### Why This Fixes It
-
-- The cascade function already reads `buffer_days` and `buffer_position` from the database for each task it processes
-- It computes effective dates internally when determining successor schedules
-- By passing actual dates instead of effective dates, the function's initial `UPDATE tasks SET start_date, end_date` writes the correct (user-intended) values
-- Buffer is only applied once (inside the cascade function) rather than twice
+- Duration field will show **3** for a Fri-to-Tue task (working days) instead of **5** (calendar days)
+- Typing "5" will compute end date as the 5th working day from start (skipping weekends)
+- The scheduling engine and UI will be in agreement on duration semantics
 
 ### Files Changed
 
-- `src/hooks/useProjectData.ts`: Remove the effective-date computation before the cascade call; pass actual task dates directly
+- `src/components/TaskDialog.tsx`: Use working-day-aware duration calculation and input handling
 
 ### What Stays the Same
 
-- The cascade RPC itself (unchanged -- it already handles buffer correctly)
-- Reconciliation loop (unchanged -- already in-memory only)
-- TaskDialog (unchanged -- already only sends deps when changed)
-- All database schema and RLS policies (unchanged)
-
+- All scheduling engine code (already uses working days correctly)
+- Cascade RPC (unchanged)
+- Database schema and RLS policies (unchanged)
+- Reconciliation logic (unchanged)
