@@ -6,7 +6,8 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin, Ban } from 'lucide-react';
+import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin, Ban, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Task, STATUS_CONFIG, CONSTRAINT_CONFIG } from '@/types/project';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
@@ -270,6 +271,19 @@ function TaskTimelineRow({
 export function TimelineView() {
   const { project, criticalTaskIds, slackDays } = useProject();
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  const zoomIn = () => setZoomLevel(prev => Math.min(prev + 0.25, 4));
+  const zoomOut = () => setZoomLevel(prev => Math.max(prev - 0.25, 0.25));
+  const resetZoom = () => setZoomLevel(1);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      if (e.deltaY < 0) zoomIn();
+      else zoomOut();
+    }
+  };
 
   const toggleBucketCollapse = (bucketId: string) => {
     setCollapsedBuckets(prev => {
@@ -320,11 +334,21 @@ export function TimelineView() {
           <h1 className="text-2xl font-bold text-foreground">Timeline</h1>
           <p className="text-sm text-muted-foreground mt-1">Visual project roadmap</p>
         </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-3 rounded-sm bg-primary" />
-            <span>Task</span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 border rounded-lg p-1">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomOut} disabled={zoomLevel <= 0.25}>
+              <ZoomOut className="w-3.5 h-3.5" />
+            </Button>
+            <span className="text-xs font-medium w-10 text-center text-muted-foreground">{Math.round(zoomLevel * 100)}%</span>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomIn} disabled={zoomLevel >= 4}>
+              <ZoomIn className="w-3.5 h-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={resetZoom} disabled={zoomLevel === 1}>
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
           </div>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <div
               className="w-5 h-3 rounded-sm opacity-50"
@@ -362,8 +386,8 @@ export function TimelineView() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto mx-6 mb-6 border rounded-xl">
-        <div className="min-w-[1200px] relative">
+      <div className="flex-1 overflow-auto mx-6 mb-6 border rounded-xl" onWheel={handleWheel}>
+        <div style={{ minWidth: `${1200 * zoomLevel}px` }} className="relative">
           {/* Week Headers */}
           <div className="sticky top-0 z-20 bg-background border-b flex">
             <div className="w-[260px] shrink-0 px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider border-r bg-muted/30">
