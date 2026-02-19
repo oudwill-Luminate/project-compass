@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import {
-  format, parseISO, differenceInDays, addDays,
+  format, parseISO, differenceInDays, addDays, addMonths,
   startOfWeek, endOfWeek, eachWeekOfInterval,
+  startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
 } from 'date-fns';
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
@@ -391,6 +392,45 @@ export function TimelineView() {
                 <X className="w-3.5 h-3.5" />
               </Button>
             )}
+          </div>
+          {/* Preset range buttons */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px] px-2"
+              onClick={() => {
+                const now = new Date();
+                setRangeStart(startOfMonth(now));
+                setRangeEnd(endOfMonth(now));
+              }}
+            >
+              This Month
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px] px-2"
+              onClick={() => {
+                const now = new Date();
+                setRangeStart(startOfQuarter(now));
+                setRangeEnd(endOfQuarter(now));
+              }}
+            >
+              This Quarter
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px] px-2"
+              onClick={() => {
+                const now = new Date();
+                setRangeStart(now);
+                setRangeEnd(addMonths(now, 6));
+              }}
+            >
+              Next 6 Months
+            </Button>
           </div>
           {/* Zoom controls */}
           <div className="flex items-center gap-1 border rounded-lg p-1">
