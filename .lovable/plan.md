@@ -1,59 +1,91 @@
 
 
-## Fix: Duration Reverts on Save
+## Fix: Stop Reconciliation Feedback Loop From Reverting Duration
 
 ### The Problem
 
-Every time the TaskDialog saves, it passes the full form data (including `dependencies`) to `updateTask`. This causes `updateTask` to treat it as a "dependency changed" event and recompute dates from the predecessors -- overwriting the user's manually set duration.
+The reconciliation and exclusion passes inside `fetchAll()` are writing date changes directly to the database. Every DB write triggers a realtime event, which triggers another `fetchAll()`, which runs the passes again, creating a feedback loop that overwrites your manual duration changes.
 
-Specifically in `src/hooks/useProjectData.ts`, at the `updateTask` function:
-
-1. `cleanedFormData` includes `dependencies` (always, even if unchanged)
-2. `dependencyChanged` check (`updates.dependencies !== undefined`) evaluates to **true**
-3. The function computes `latestScheduled` from predecessors
-4. Line 664: `updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate }` **overwrites the user's new end date**
-5. The overwritten dates get saved to the database, reverting the duration
+The sequence:
+1. You save the new duration (e.g., 5 days) -- correctly written to the database
+2. Realtime event fires, triggering `fetchAll()`
+3. `fetchAll()` runs the exclusion pass, detects overlaps with exclusion-linked tasks
+4. The exclusion pass writes "corrected" dates to the database (fire-and-forget)
+5. Those writes trigger more realtime events, more `fetchAll()` calls
+6. Meanwhile, `updateTask` also calls `fetchAll()` explicitly
+7. Multiple `fetchAll()` calls race each other, each overwriting dates in the database
+8. The task's duration ends up reverting to whatever the exclusion/reconciliation math computes
 
 ### The Fix
 
-Two changes are needed:
+Remove all database writes from the `fetchAll()` reconciliation and exclusion passes. These passes should only adjust in-memory state (for correct display), not write back to the database. The authoritative scheduling enforcement is already handled by the `cascade_task_dates` RPC, which runs when dates actually change via `updateTask`.
 
-**1. TaskDialog (`src/components/TaskDialog.tsx`)**: Only include `dependencies` and `exclusionLinks` in the update payload if they actually changed from the original task values. This prevents every save from triggering the dependency rescheduling logic.
+### Technical Details
 
-In `handleSave`, compare `cleanDeps` against `task.dependencies` and `cleanExclusions` against `task.exclusionLinks` before including them:
+**File: `src/hooks/useProjectData.ts`**
 
-```text
-// Only include dependencies if they actually changed
-const depsChanged = JSON.stringify(cleanDeps) !== JSON.stringify(task.dependencies || []);
-const exclusionsChanged = JSON.stringify(cleanExclusions.sort()) !== JSON.stringify((task.exclusionLinks || []).sort());
-
-const cleanedFormData = {
-  ...formData,
-  ...(depsChanged ? { dependencies: cleanDeps, dependsOn: ..., dependencyType: ... } : {}),
-  ...(exclusionsChanged ? { exclusionLinks: cleanExclusions } : {}),
-};
-```
-
-**2. updateTask (`src/hooks/useProjectData.ts`)**: As a safety net, even when dependencies ARE included in the update, only override dates if the task's current start actually violates the computed dependency schedule. This mirrors the reconciliation fix:
+**Change 1: Reconciliation pass (lines 511-517)** -- Remove the `supabase.from('tasks').update(...)` call. Only update the in-memory task object so the UI displays correctly:
 
 ```text
-if (latestScheduled) {
-  // Only override if current start violates the dependency
-  const currentStart = updates.startDate || oldTask.startDate;
-  if (currentStart < latestScheduled.startDate) {
-    updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
-  }
+// BEFORE:
+if (finalStart !== task.startDate || finalEnd !== task.endDate) {
+  supabase.from('tasks').update({
+    start_date: finalStart,
+    end_date: finalEnd,
+  }).eq('id', task.id).then(() => {});
+}
+
+// AFTER:
+if (finalStart !== task.startDate || finalEnd !== task.endDate) {
+  task.startDate = finalStart;
+  task.endDate = finalEnd;
 }
 ```
 
+**Change 2: Exclusion pass (lines 538-543)** -- Same treatment. Remove the DB write and only update the in-memory task objects:
+
+```text
+// BEFORE:
+laterTask.startDate = format(newStart, 'yyyy-MM-dd');
+laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
+supabase.from('tasks').update({
+  start_date: laterTask.startDate,
+  end_date: laterTask.endDate,
+}).eq('id', laterTask.id).then(() => {});
+
+// AFTER:
+laterTask.startDate = format(newStart, 'yyyy-MM-dd');
+laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
+// No DB write -- only in-memory for display.
+// Authoritative scheduling handled by cascade_task_dates RPC.
+```
+
+**Change 3: Move `setProject()` after reconciliation** -- Currently `setProject(proj)` is called at line 438 *before* the reconciliation loop modifies task dates. The reconciled dates are never reflected in React state. Move `setProject()` to after the exclusion pass so the UI displays the reconciled dates:
+
+```text
+// Remove setProject(proj) from line 438
+// Add it after the exclusion pass (after line 546):
+setProject({
+  ...proj,
+  buckets: proj.buckets.map(b => ({
+    ...b,
+    tasks: buildTaskTree(/* use the reconciled allTasksFlat */),
+  })),
+});
+```
+
+Since `allTasksFlat` is a flat array and we need tree structure, the simpler approach is to mutate the task objects in-place (they're fresh objects from `buildTaskTree`) during reconciliation, then call `setProject(proj)` afterward. The task objects in `proj.buckets[].tasks` are the same references as in `allTasksFlat`, so mutations are reflected.
+
 ### Files Changed
 
-- `src/components/TaskDialog.tsx`: Compare dependencies/exclusions before including in update payload
-- `src/hooks/useProjectData.ts`: Guard the date override in `updateTask` to only apply when the dependency is violated
+- `src/hooks/useProjectData.ts`: Remove DB writes from reconciliation and exclusion passes; move `setProject()` after reconciliation
 
 ### What Stays the Same
 
-- Reconciliation loop (already fixed to be conditional)
-- Cascade RPC logic (unchanged)
+- `cascade_task_dates` RPC (unchanged -- still the authoritative scheduling engine)
+- `updateTask` logic (unchanged -- still calls cascade RPC when dates change)
+- TaskDialog fix (unchanged -- still only includes deps/exclusions when changed)
 - All database schema and RLS policies (unchanged)
-- Dependency detection on actual dependency changes (still works -- adding/removing a dependency will still reschedule)
+- Realtime subscriptions (unchanged -- they still trigger fetchAll for data freshness)
+- "Refresh Schedule" button (unchanged)
+
