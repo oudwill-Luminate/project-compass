@@ -102,8 +102,17 @@ function TaskTimelineRow({
               }}
             />
           ))}
-          {/* Task Bar */}
-          {(() => {
+          {/* Task Bar or Milestone Diamond */}
+          {task.isMilestone ? (
+            <div
+              className={`absolute top-3 w-3.5 h-3.5 rotate-45 cursor-pointer hover:scale-125 transition-transform ${isCritical ? 'ring-2 ring-orange-500 ring-offset-1' : ''}`}
+              style={{
+                left: pos.left,
+                backgroundColor: statusColor,
+              }}
+              title={`⬦ ${task.title}: ${format(parseISO(displayStart), 'MMM dd')} (Milestone)`}
+            />
+          ) : (() => {
             const isLeafWorking = task.status === 'working' && !hasSubTasks;
             const parentProgress = hasSubTasks
               ? Math.round(task.subTasks.reduce((sum, t) => sum + (t.progress || 0), 0) / task.subTasks.length)
@@ -314,6 +323,10 @@ export function TimelineView() {
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-0 border-t-2 border-dashed border-muted-foreground/40" />
             <span>Slack</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rotate-45 bg-primary" />
+            <span>Milestone</span>
           </div>
         </div>
       </div>

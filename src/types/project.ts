@@ -27,6 +27,7 @@ export interface Task {
   parentTaskId: string | null;
   bufferDays: number;
   bufferPosition: 'start' | 'end';
+  isMilestone: boolean;
   responsible: string | null;
   progress: number; // 0-100
   effortHours: number;

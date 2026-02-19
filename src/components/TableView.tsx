@@ -98,6 +98,7 @@ export function TableView() {
     baselineStartDate: null,
     baselineEndDate: null,
     realizedCost: 0,
+    isMilestone: false,
     subTasks: [],
   };
 

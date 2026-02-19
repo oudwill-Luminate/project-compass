@@ -84,6 +84,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       parentTaskId: t.parent_task_id,
       bufferDays: t.buffer_days || 0,
       bufferPosition: (t.buffer_position === 'start' ? 'start' : 'end') as 'start' | 'end',
+      isMilestone: (t as any).is_milestone || false,
       responsible: t.responsible || null,
       progress: t.progress || 0,
       effortHours: Number(t.effort_hours) || 0,
@@ -487,6 +488,7 @@ export function useProjectData(projectId: string | undefined) {
               baselineStartDate: predRow.baseline_start_date,
               baselineEndDate: predRow.baseline_end_date,
               realizedCost: predRow.realized_cost,
+              isMilestone: (predRow as any).is_milestone || false,
               subTasks: [],
             };
           }
@@ -538,6 +540,7 @@ export function useProjectData(projectId: string | undefined) {
     if (updates.parentTaskId !== undefined) dbUpdates.parent_task_id = updates.parentTaskId;
     if (updates.bufferDays !== undefined) dbUpdates.buffer_days = updates.bufferDays;
     if (updates.bufferPosition !== undefined) dbUpdates.buffer_position = updates.bufferPosition;
+    if (updates.isMilestone !== undefined) dbUpdates.is_milestone = updates.isMilestone;
     if (updates.responsible !== undefined) dbUpdates.responsible = updates.responsible;
     if (updates.progress !== undefined) dbUpdates.progress = updates.progress;
     if (updates.effortHours !== undefined) dbUpdates.effort_hours = updates.effortHours;
@@ -744,6 +747,7 @@ export function useProjectData(projectId: string | undefined) {
       flaggedAsRisk: false,
       bufferDays: 0,
       bufferPosition: 'end',
+      isMilestone: false,
       responsible: null,
       progress: 0,
       effortHours: 0,

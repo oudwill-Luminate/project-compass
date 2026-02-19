@@ -486,6 +486,7 @@ export type Database = {
           estimated_cost: number
           flagged_as_risk: boolean
           id: string
+          is_milestone: boolean
           owner_id: string | null
           parent_task_id: string | null
           position: number
@@ -516,6 +517,7 @@ export type Database = {
           estimated_cost?: number
           flagged_as_risk?: boolean
           id?: string
+          is_milestone?: boolean
           owner_id?: string | null
           parent_task_id?: string | null
           position?: number
@@ -546,6 +548,7 @@ export type Database = {
           estimated_cost?: number
           flagged_as_risk?: boolean
           id?: string
+          is_milestone?: boolean
           owner_id?: string | null
           parent_task_id?: string | null
           position?: number
