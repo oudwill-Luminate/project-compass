@@ -462,16 +462,22 @@ export function useProjectData(projectId: string | undefined) {
         }
       }
 
-      let finalStart = latestStart || task.startDate;
       const currentDuration = workingDaysDiff(
         parseISO(task.startDate), parseISO(task.endDate), includeWeekends
       );
-      let finalEnd = format(
-        addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
-        'yyyy-MM-dd'
-      );
 
-      // Apply schedule constraint on top
+      // Only shift if the task's current start violates the dependency (starts too early)
+      let finalStart = task.startDate;
+      let finalEnd = task.endDate;
+      if (latestStart && task.startDate < latestStart) {
+        finalStart = latestStart;
+        finalEnd = format(
+          addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends),
+          'yyyy-MM-dd'
+        );
+      }
+
+      // Apply schedule constraint — only override when actually violated
       if (task.constraintType !== 'ASAP' && task.constraintDate) {
         const cd = task.constraintDate;
         switch (task.constraintType) {
@@ -482,12 +488,10 @@ export function useProjectData(projectId: string | undefined) {
             }
             break;
           case 'SNLT':
-            if (cd < finalStart) {
-              finalStart = cd;
-              finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
-            }
+            // Only warn — don't force move if dependency pushed it later
             break;
           case 'MSO':
+            // Must constraints always override
             finalStart = cd;
             finalEnd = format(addWorkingDays(parseISO(finalStart), currentDuration, includeWeekends), 'yyyy-MM-dd');
             break;
@@ -499,7 +503,7 @@ export function useProjectData(projectId: string | undefined) {
             if (cd > finalEnd) finalEnd = cd;
             break;
           case 'FNLT':
-            if (cd < finalEnd) finalEnd = cd;
+            // Only warn — don't force move
             break;
         }
       }
