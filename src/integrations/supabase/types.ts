@@ -470,6 +470,45 @@ export type Database = {
           },
         ]
       }
+      task_dependencies: {
+        Row: {
+          created_at: string
+          dependency_type: Database["public"]["Enums"]["dependency_type"]
+          id: string
+          predecessor_id: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          dependency_type?: Database["public"]["Enums"]["dependency_type"]
+          id?: string
+          predecessor_id: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          dependency_type?: Database["public"]["Enums"]["dependency_type"]
+          id?: string
+          predecessor_id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_dependencies_predecessor_id_fkey"
+            columns: ["predecessor_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           actual_cost: number

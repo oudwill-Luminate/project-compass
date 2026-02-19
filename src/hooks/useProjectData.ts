@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Project, Bucket, Task, Owner, DependencyType, TaskStatus, TaskPriority } from '@/types/project';
+import { Project, Bucket, Task, Owner, DependencyType, TaskStatus, TaskPriority, TaskDependency } from '@/types/project';
 import { useAuth } from '@/context/AuthContext';
 import { differenceInDays, parseISO, addDays, format } from 'date-fns';
 import { toast } from 'sonner';
@@ -55,7 +55,7 @@ interface TaskRow {
 
 const COLORS = ['#0073EA', '#00C875', '#A25DDC', '#FDAB3D', '#E2445C', '#579BFC', '#FF642E'];
 
-function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRow>): Task[] {
+function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRow>, depMap?: Map<string, TaskDependency[]>): Task[] {
   const taskMap = new Map<string, Task>();
 
   // First pass: create all tasks
@@ -77,6 +77,7 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       actualCost: Number(t.actual_cost),
       dependsOn: t.depends_on,
       dependencyType: (t.dependency_type || 'FS') as DependencyType,
+      dependencies: [], // populated later from junction table
       flaggedAsRisk: t.flagged_as_risk,
       riskImpact: t.risk_impact,
       riskProbability: t.risk_probability,
@@ -93,6 +94,21 @@ function buildTaskTree(taskRows: TaskRow[], profileMap: Record<string, ProfileRo
       realizedCost: Number(t.realized_cost) || 0,
       subTasks: [],
     });
+  }
+
+  // Populate dependencies from junction table
+  if (depMap) {
+    for (const [taskId, deps] of depMap) {
+      const task = taskMap.get(taskId);
+      if (task) {
+        task.dependencies = deps;
+        // Backward compat: set dependsOn to first predecessor
+        if (deps.length > 0) {
+          task.dependsOn = deps[0].predecessorId;
+          task.dependencyType = deps[0].type;
+        }
+      }
+    }
   }
 
   // Second pass: nest children under parents
@@ -185,23 +201,27 @@ function getEffectiveDates(task: Task): { startDate: string; endDate: string } {
   return { startDate, endDate };
 }
 
-/** Detect circular dependency: walk the chain from proposedDependsOn and check if we reach taskId.
+/** Detect circular dependency using BFS through all dependencies.
  *  Returns the chain of task IDs in the cycle, or null if no cycle. */
 function detectCircularDependency(
   taskId: string,
-  proposedDependsOn: string,
+  proposedDeps: TaskDependency[],
   allTasks: Task[]
 ): string[] | null {
-  const chain: string[] = [taskId];
-  const visited = new Set<string>();
-  let current: string | null = proposedDependsOn;
-  while (current) {
-    chain.push(current);
-    if (current === taskId) return chain;
-    if (visited.has(current)) break;
-    visited.add(current);
-    const task = allTasks.find(t => t.id === current);
-    current = task?.dependsOn ?? null;
+  // BFS from each proposed predecessor to see if we can reach taskId
+  for (const dep of proposedDeps) {
+    const queue: string[] = [dep.predecessorId];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === taskId) return [taskId, dep.predecessorId, current];
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const task = allTasks.find(t => t.id === current);
+      if (!task) continue;
+      const taskDeps = task.dependencies.length > 0 ? task.dependencies : (task.dependsOn ? [{ predecessorId: task.dependsOn, type: task.dependencyType }] : []);
+      taskDeps.forEach(d => queue.push(d.predecessorId));
+    }
   }
   return null;
 }
@@ -341,6 +361,23 @@ export function useProjectData(projectId: string | undefined) {
       taskRows = (data || []) as TaskRow[];
     }
 
+    // Fetch task dependencies from junction table
+    const taskIds = taskRows.map(t => t.id);
+    const depMap = new Map<string, TaskDependency[]>();
+    if (taskIds.length > 0) {
+      const { data: depData } = await supabase
+        .from('task_dependencies' as any)
+        .select('task_id, predecessor_id, dependency_type')
+        .in('task_id', taskIds);
+      if (depData) {
+        for (const row of depData as any[]) {
+          const existing = depMap.get(row.task_id) || [];
+          existing.push({ predecessorId: row.predecessor_id, type: row.dependency_type as DependencyType });
+          depMap.set(row.task_id, existing);
+        }
+      }
+    }
+
     const memberRows = (membersRes.data || []) as any[];
     const allUserIds = new Set<string>();
     memberRows.forEach((m: any) => allUserIds.add(m.user_id));
@@ -365,7 +402,7 @@ export function useProjectData(projectId: string | undefined) {
       description: b.description || '',
       ownerId: b.owner_id || null,
       collapsed: false,
-      tasks: buildTaskTree(taskRows.filter(t => t.bucket_id === b.id), profileMap),
+      tasks: buildTaskTree(taskRows.filter(t => t.bucket_id === b.id), profileMap, depMap),
     }));
 
     const proj: Project = {
@@ -379,31 +416,41 @@ export function useProjectData(projectId: string | undefined) {
 
     setProject(proj);
 
-    // Reconcile: fix tasks depending on parent tasks whose rolled-up dates differ from stored
+    // Reconcile: fix dependent tasks using ALL dependencies (most restrictive start)
     const allTasksFlat = buckets.flatMap(b => flattenTasks(b.tasks));
     const includeWeekends = projData.include_weekends ?? false;
     for (const task of allTasksFlat) {
-      if (!task.dependsOn) continue;
-      const pred = allTasksFlat.find(t => t.id === task.dependsOn);
-      if (!pred) continue;
-      const eff = getEffectiveDates(pred);
-      const scheduled = scheduleTask(
-        { ...pred, startDate: eff.startDate, endDate: eff.endDate },
-        task,
-        task.dependencyType,
-        includeWeekends
-      );
+      const deps = task.dependencies.length > 0 ? task.dependencies : (task.dependsOn ? [{ predecessorId: task.dependsOn, type: task.dependencyType }] : []);
+      if (deps.length === 0) continue;
+
+      // Compute the most restrictive (latest) start from all predecessors
+      let latestStart: string | null = null;
+      for (const dep of deps) {
+        const pred = allTasksFlat.find(t => t.id === dep.predecessorId);
+        if (!pred) continue;
+        const eff = getEffectiveDates(pred);
+        const scheduled = scheduleTask(
+          { ...pred, startDate: eff.startDate, endDate: eff.endDate },
+          task,
+          dep.type,
+          includeWeekends
+        );
+        if (!latestStart || scheduled.startDate > latestStart) {
+          latestStart = scheduled.startDate;
+        }
+      }
+
       // Only reconcile the START date; preserve the user's duration
-      if (scheduled.startDate !== task.startDate) {
+      if (latestStart && latestStart !== task.startDate) {
         const currentDuration = workingDaysDiff(
           parseISO(task.startDate), parseISO(task.endDate), includeWeekends
         );
         const newEnd = format(
-          addWorkingDays(parseISO(scheduled.startDate), currentDuration, includeWeekends),
+          addWorkingDays(parseISO(latestStart), currentDuration, includeWeekends),
           'yyyy-MM-dd'
         );
         supabase.from('tasks').update({
-          start_date: scheduled.startDate,
+          start_date: latestStart,
           end_date: newEnd,
         }).eq('id', task.id).then(() => {});
       }
@@ -430,6 +477,7 @@ export function useProjectData(projectId: string | undefined) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'buckets', filter: `project_id=eq.${projectId}` }, () => fetchAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_dependencies' }, () => fetchAll())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -442,79 +490,116 @@ export function useProjectData(projectId: string | undefined) {
     const oldTask = allTasks.find(t => t.id === taskId);
     if (!oldTask) return;
 
-    // If dependency link or type changed, auto-schedule this task's dates
+    // Check if dependencies changed (new multi-dep or legacy single dep)
     const dependencyChanged =
+      (updates.dependencies !== undefined) ||
       (updates.dependsOn !== undefined && updates.dependsOn !== oldTask.dependsOn) ||
       (updates.dependencyType !== undefined && updates.dependencyType !== oldTask.dependencyType);
 
     if (dependencyChanged) {
-      const predecessorId = updates.dependsOn !== undefined ? updates.dependsOn : oldTask.dependsOn;
-      const depType = (updates.dependencyType !== undefined ? updates.dependencyType : oldTask.dependencyType) as DependencyType;
+      // Determine new dependencies list
+      let newDeps: TaskDependency[] = [];
+      if (updates.dependencies !== undefined) {
+        newDeps = updates.dependencies;
+      } else {
+        const predecessorId = updates.dependsOn !== undefined ? updates.dependsOn : oldTask.dependsOn;
+        const depType = (updates.dependencyType !== undefined ? updates.dependencyType : oldTask.dependencyType) as DependencyType;
+        if (predecessorId) {
+          newDeps = [{ predecessorId, type: depType }];
+        }
+      }
 
-      if (predecessorId) {
+      if (newDeps.length > 0) {
         // Circular dependency check
-        const cycle = detectCircularDependency(taskId, predecessorId, allTasks);
+        const cycle = detectCircularDependency(taskId, newDeps, allTasks);
         if (cycle) {
           const names = cycle.map(id => allTasks.find(t => t.id === id)?.title || 'Unknown').join(' → ');
           toast.error(`Circular dependency: ${names}`);
           return;
         }
 
-        let predecessor = allTasks.find(t => t.id === predecessorId);
-        
-        // DB fallback: if predecessor not found in memory (stale closure), fetch from DB
-        if (!predecessor) {
-          const { data: predRow } = await supabase
-            .from('tasks')
-            .select('*')
-            .eq('id', predecessorId)
-            .single();
-          if (predRow) {
-            predecessor = {
-              id: predRow.id,
-              title: predRow.title,
-              status: predRow.status as TaskStatus,
-              priority: predRow.priority as TaskPriority,
-              owner: { id: predRow.owner_id || '', name: '', color: '#888' },
-              startDate: predRow.start_date,
-              endDate: predRow.end_date,
-              estimatedCost: predRow.estimated_cost,
-              actualCost: predRow.actual_cost,
-              dependsOn: predRow.depends_on,
-              dependencyType: (predRow.dependency_type || 'FS') as DependencyType,
-              flaggedAsRisk: predRow.flagged_as_risk,
-              riskImpact: predRow.risk_impact,
-              riskProbability: predRow.risk_probability,
-              riskDescription: predRow.risk_description,
-              parentTaskId: predRow.parent_task_id,
-              bufferDays: predRow.buffer_days,
-              bufferPosition: (predRow.buffer_position || 'end') as 'start' | 'end',
-              responsible: predRow.responsible,
-              progress: predRow.progress,
-              effortHours: predRow.effort_hours,
-              baselineStartDate: predRow.baseline_start_date,
-              baselineEndDate: predRow.baseline_end_date,
-              realizedCost: predRow.realized_cost,
-              isMilestone: (predRow as any).is_milestone || false,
-              subTasks: [],
+        // Schedule using most restrictive predecessor
+        let latestScheduled: { startDate: string; endDate: string } | null = null;
+        for (const dep of newDeps) {
+          let predecessor = allTasks.find(t => t.id === dep.predecessorId);
+          if (!predecessor) {
+            const { data: predRow } = await supabase
+              .from('tasks')
+              .select('*')
+              .eq('id', dep.predecessorId)
+              .single();
+            if (predRow) {
+              predecessor = {
+                id: predRow.id, title: predRow.title,
+                status: predRow.status as TaskStatus, priority: predRow.priority as TaskPriority,
+                owner: { id: predRow.owner_id || '', name: '', color: '#888' },
+                startDate: predRow.start_date, endDate: predRow.end_date,
+                estimatedCost: predRow.estimated_cost, actualCost: predRow.actual_cost,
+                dependsOn: predRow.depends_on, dependencyType: (predRow.dependency_type || 'FS') as DependencyType,
+                dependencies: [],
+                flaggedAsRisk: predRow.flagged_as_risk, riskImpact: predRow.risk_impact,
+                riskProbability: predRow.risk_probability, riskDescription: predRow.risk_description,
+                parentTaskId: predRow.parent_task_id,
+                bufferDays: predRow.buffer_days, bufferPosition: (predRow.buffer_position || 'end') as 'start' | 'end',
+                responsible: predRow.responsible, progress: predRow.progress,
+                effortHours: predRow.effort_hours,
+                baselineStartDate: predRow.baseline_start_date, baselineEndDate: predRow.baseline_end_date,
+                realizedCost: predRow.realized_cost,
+                isMilestone: (predRow as any).is_milestone || false,
+                subTasks: [],
+              };
+            }
+          }
+          if (predecessor) {
+            const effectivePred = getEffectiveDates(predecessor);
+            const currentTask = {
+              startDate: updates.startDate || oldTask.startDate,
+              endDate: updates.endDate || oldTask.endDate,
             };
+            const scheduled = scheduleTask(
+              { ...predecessor, startDate: effectivePred.startDate, endDate: effectivePred.endDate },
+              currentTask,
+              dep.type,
+              project.includeWeekends
+            );
+            if (!latestScheduled || scheduled.startDate > latestScheduled.startDate) {
+              latestScheduled = scheduled;
+            }
           }
         }
-
-        if (predecessor) {
-          const effectivePred = getEffectiveDates(predecessor);
-          const currentTask = {
-            startDate: updates.startDate || oldTask.startDate,
-            endDate: updates.endDate || oldTask.endDate,
-          };
-          const scheduled = scheduleTask(
-            { ...predecessor, startDate: effectivePred.startDate, endDate: effectivePred.endDate },
-            currentTask,
-            depType,
-            project.includeWeekends
-          );
-          updates = { ...updates, startDate: scheduled.startDate, endDate: scheduled.endDate };
+        if (latestScheduled) {
+          updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
         }
+      }
+
+      // Sync junction table
+      if (updates.dependencies !== undefined) {
+        const oldDeps = oldTask.dependencies || [];
+        // Delete removed dependencies
+        const removedPreds = oldDeps.filter(od => !newDeps.some(nd => nd.predecessorId === od.predecessorId));
+        for (const rd of removedPreds) {
+          await supabase.from('task_dependencies' as any).delete()
+            .eq('task_id', taskId).eq('predecessor_id', rd.predecessorId);
+        }
+        // Insert new dependencies
+        const addedDeps = newDeps.filter(nd => !oldDeps.some(od => od.predecessorId === nd.predecessorId));
+        if (addedDeps.length > 0) {
+          await supabase.from('task_dependencies' as any).insert(
+            addedDeps.map(d => ({ task_id: taskId, predecessor_id: d.predecessorId, dependency_type: d.type }))
+          );
+        }
+        // Update changed types
+        const changedDeps = newDeps.filter(nd => {
+          const old = oldDeps.find(od => od.predecessorId === nd.predecessorId);
+          return old && old.type !== nd.type;
+        });
+        for (const cd of changedDeps) {
+          await supabase.from('task_dependencies' as any).update({ dependency_type: cd.type })
+            .eq('task_id', taskId).eq('predecessor_id', cd.predecessorId);
+        }
+        // Also sync legacy columns for backward compat
+        updates.dependsOn = newDeps.length > 0 ? newDeps[0].predecessorId : null;
+        updates.dependencyType = newDeps.length > 0 ? newDeps[0].type : 'FS';
       }
     }
 
@@ -751,6 +836,7 @@ export function useProjectData(projectId: string | undefined) {
       actualCost: 0,
       dependsOn: null,
       dependencyType: 'FS',
+      dependencies: [],
       flaggedAsRisk: false,
       bufferDays: 0,
       bufferPosition: 'end',

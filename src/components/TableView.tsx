@@ -85,6 +85,7 @@ export function TableView() {
     actualCost: 0,
     dependsOn: null,
     dependencyType: 'FS',
+    dependencies: [],
     flaggedAsRisk: false,
     bufferDays: 0,
     bufferPosition: 'end',

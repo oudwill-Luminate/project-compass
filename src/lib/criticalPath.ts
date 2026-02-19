@@ -31,12 +31,12 @@ export function computeCriticalPath(allTasks: Task[]): CriticalPathResult {
     if (es.has(id)) return es.get(id)!;
     const t = taskMap.get(id)!;
     const start = parseISO(t.startDate).getTime();
-    if (!t.dependsOn || !taskMap.has(t.dependsOn)) {
+    const deps = t.dependencies?.length > 0 ? t.dependencies : (t.dependsOn && taskMap.has(t.dependsOn) ? [{ predecessorId: t.dependsOn, type: t.dependencyType }] : []);
+    if (deps.length === 0) {
       es.set(id, start);
       return start;
     }
-    const predEF = getEF(t.dependsOn);
-    const earliest = Math.max(start, predEF + DAY_MS);
+    const earliest = Math.max(start, ...deps.filter(d => taskMap.has(d.predecessorId)).map(d => getEF(d.predecessorId) + DAY_MS));
     es.set(id, earliest);
     return earliest;
   };
@@ -63,11 +63,14 @@ export function computeCriticalPath(allTasks: Task[]): CriticalPathResult {
   // Build successor map
   const successors = new Map<string, string[]>();
   tasks.forEach(t => {
-    if (t.dependsOn && taskMap.has(t.dependsOn)) {
-      const list = successors.get(t.dependsOn) || [];
-      list.push(t.id);
-      successors.set(t.dependsOn, list);
-    }
+    const deps = t.dependencies?.length > 0 ? t.dependencies : (t.dependsOn && taskMap.has(t.dependsOn) ? [{ predecessorId: t.dependsOn, type: t.dependencyType }] : []);
+    deps.forEach(d => {
+      if (taskMap.has(d.predecessorId)) {
+        const list = successors.get(d.predecessorId) || [];
+        list.push(t.id);
+        successors.set(d.predecessorId, list);
+      }
+    });
   });
 
   const getLF = (id: string): number => {
