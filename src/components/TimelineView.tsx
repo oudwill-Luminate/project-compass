@@ -6,7 +6,7 @@ import {
 import { useProject } from '@/context/ProjectContext';
 import { flattenTasks } from '@/hooks/useProjectData';
 import { OwnerAvatar } from './OwnerAvatar';
-import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin } from 'lucide-react';
+import { ChevronRight, ChevronDown, Shield, AlertTriangle, Pin, Ban } from 'lucide-react';
 import { Task, STATUS_CONFIG, CONSTRAINT_CONFIG } from '@/types/project';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
@@ -143,6 +143,18 @@ function TaskTimelineRow({
                           <TooltipContent className="text-xs">
                             {task.constraintType}: {CONSTRAINT_CONFIG[task.constraintType].label}
                             {task.constraintDate && ` (${format(parseISO(task.constraintDate), 'MMM dd')})`}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                    {(task.exclusionLinks?.length || 0) > 0 && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Ban className="w-3 h-3 shrink-0 text-white/80" />
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">
+                            Non-overlap: {task.exclusionLinks.length} link{task.exclusionLinks.length !== 1 ? 's' : ''}
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -342,6 +354,10 @@ export function TimelineView() {
           <div className="flex items-center gap-1.5">
             <div className="w-3 h-3 rotate-45 bg-primary" />
             <span>Milestone</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Ban className="w-3.5 h-3.5 text-orange-500" />
+            <span>Non-Overlap</span>
           </div>
         </div>
       </div>

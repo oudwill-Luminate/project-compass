@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format, parseISO, addDays, differenceInDays } from 'date-fns';
-import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare, Diamond, Pin } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Link, GripVertical, Trash2, ChevronRight, ChevronDown, Plus, Shield, CheckSquare, Diamond, Pin, Ban } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Task, STATUS_CONFIG, PRIORITY_CONFIG, TaskStatus, TaskPriority, CONSTRAINT_CONFIG } from '@/types/project';
 import { useProject } from '@/context/ProjectContext';
@@ -194,6 +194,15 @@ export function TaskRow({ task, bucketId, bucketColor, depth = 0, dragHandleProp
           >
             <Link className="w-3 h-3" />
             {depCount > 1 && <span className="text-[10px] font-medium">{depCount}</span>}
+          </span>
+        )}
+        {(task.exclusionLinks?.length || 0) > 0 && (
+          <span
+            className="text-orange-500 shrink-0 inline-flex items-center gap-0.5"
+            title={`Non-overlap: ${task.exclusionLinks.map(id => getTaskById(id)?.title || id).join(', ')}`}
+          >
+            <Ban className="w-3 h-3" />
+            {task.exclusionLinks.length > 1 && <span className="text-[10px] font-medium">{task.exclusionLinks.length}</span>}
           </span>
         )}
         {task.flaggedAsRisk && !isHighRisk && (
