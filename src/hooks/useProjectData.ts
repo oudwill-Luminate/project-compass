@@ -435,8 +435,6 @@ export function useProjectData(projectId: string | undefined) {
       buckets,
     };
 
-    setProject(proj);
-
     // Reconcile: fix dependent tasks using ALL dependencies (most restrictive start) + constraints
     const allTasksFlat = buckets.flatMap(b => flattenTasks(b.tasks));
     const includeWeekends = projData.include_weekends ?? false;
@@ -508,12 +506,10 @@ export function useProjectData(projectId: string | undefined) {
         }
       }
 
-      // Only reconcile if dates actually changed
+      // Only reconcile in-memory — no DB write to avoid feedback loop
       if (finalStart !== task.startDate || finalEnd !== task.endDate) {
-        supabase.from('tasks').update({
-          start_date: finalStart,
-          end_date: finalEnd,
-        }).eq('id', task.id).then(() => {});
+        task.startDate = finalStart;
+        task.endDate = finalEnd;
       }
     }
 
@@ -537,13 +533,13 @@ export function useProjectData(projectId: string | undefined) {
           const newEnd = addWorkingDays(newStart, laterDuration, includeWeekends);
           laterTask.startDate = format(newStart, 'yyyy-MM-dd');
           laterTask.endDate = format(newEnd, 'yyyy-MM-dd');
-          supabase.from('tasks').update({
-            start_date: laterTask.startDate,
-            end_date: laterTask.endDate,
-          }).eq('id', laterTask.id).then(() => {});
+          // No DB write — in-memory only. Authoritative scheduling via cascade_task_dates RPC.
         }
       }
     }
+
+    // Set project state AFTER reconciliation so UI reflects corrected dates
+    setProject(proj);
 
     setMembers(memberRows.map((m: any) => ({
       id: m.id,
