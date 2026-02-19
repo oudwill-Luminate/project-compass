@@ -1,72 +1,59 @@
 
 
-## Fix: Task Duration Being Automatically Reverted
+## Fix: Duration Reverts on Save
 
 ### The Problem
 
-When you manually change a task's duration (e.g., setting "Ductwork Distribution" from 7 to 4 days), the system immediately reverts it back. Here's what's happening:
+Every time the TaskDialog saves, it passes the full form data (including `dependencies`) to `updateTask`. This causes `updateTask` to treat it as a "dependency changed" event and recompute dates from the predecessors -- overwriting the user's manually set duration.
 
-1. You save the new duration -- the end date is updated in the database
-2. The database change triggers a real-time refresh of all project data
-3. During that refresh, a "reconciliation loop" automatically recalculates every task's dates based on its dependencies and constraints
-4. That recalculation overwrites the duration you just set, snapping it back to whatever the dependency math says it should be
+Specifically in `src/hooks/useProjectData.ts`, at the `updateTask` function:
 
-This is essentially the scheduling engine fighting against your manual edits -- it treats every refresh as an opportunity to enforce dependency-driven dates, even when you deliberately changed the duration.
+1. `cleanedFormData` includes `dependencies` (always, even if unchanged)
+2. `dependencyChanged` check (`updates.dependencies !== undefined`) evaluates to **true**
+3. The function computes `latestScheduled` from predecessors
+4. Line 664: `updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate }` **overwrites the user's new end date**
+5. The overwritten dates get saved to the database, reverting the duration
 
 ### The Fix
 
-The reconciliation loop should only shift a task's dates when they genuinely violate a dependency or constraint. Right now it recalculates dates even when the current dates already satisfy all rules.
+Two changes are needed:
 
-**What changes:**
+**1. TaskDialog (`src/components/TaskDialog.tsx`)**: Only include `dependencies` and `exclusionLinks` in the update payload if they actually changed from the original task values. This prevents every save from triggering the dependency rescheduling logic.
 
-Instead of always computing and applying new dates, the reconciliation will first check: "Does this task's current start date already satisfy its dependencies and constraints?" If yes, it leaves the task alone. It only shifts dates when the task would otherwise start *before* its earliest allowed date (violating a dependency or constraint).
-
-### Technical Details
-
-**File: `src/hooks/useProjectData.ts` (reconciliation loop, ~lines 443-513)**
-
-Current behavior: For every task with dependencies, it computes a new `latestStart` and unconditionally applies it (along with recalculated end date), overwriting any manual changes.
-
-New behavior:
-- Compute the earliest allowed start from dependencies (the `latestStart`)
-- Only override the task's dates if its current start date is **earlier** than the allowed start (i.e., it violates a dependency)
-- If the task's current start is already at or after the allowed start, leave it alone -- the user's manual duration is respected
-- Same logic for constraints: only override if the current dates actually violate the constraint
-
-The key change in pseudocode:
+In `handleSave`, compare `cleanDeps` against `task.dependencies` and `cleanExclusions` against `task.exclusionLinks` before including them:
 
 ```text
-// BEFORE (always overrides):
-finalStart = latestStart || task.startDate;
-finalEnd = recalculate(finalStart, duration);
-// writes to DB regardless
+// Only include dependencies if they actually changed
+const depsChanged = JSON.stringify(cleanDeps) !== JSON.stringify(task.dependencies || []);
+const exclusionsChanged = JSON.stringify(cleanExclusions.sort()) !== JSON.stringify((task.exclusionLinks || []).sort());
 
-// AFTER (only overrides on violation):
-const earliestAllowed = latestStart;
-if (earliestAllowed && task.startDate < earliestAllowed) {
-  // Task violates dependency -- shift it forward
-  finalStart = earliestAllowed;
-  finalEnd = recalculate(finalStart, duration);
-} else {
-  // Task is fine where it is -- respect manual dates
-  finalStart = task.startDate;
-  finalEnd = task.endDate;
-}
-// Only write if dates actually changed
+const cleanedFormData = {
+  ...formData,
+  ...(depsChanged ? { dependencies: cleanDeps, dependsOn: ..., dependencyType: ... } : {}),
+  ...(exclusionsChanged ? { exclusionLinks: cleanExclusions } : {}),
+};
 ```
 
-The same principle applies to the constraint logic (SNET, MSO, etc.) and the exclusion pass -- only shift when there's an actual violation, not on every refresh.
+**2. updateTask (`src/hooks/useProjectData.ts`)**: As a safety net, even when dependencies ARE included in the update, only override dates if the task's current start actually violates the computed dependency schedule. This mirrors the reconciliation fix:
+
+```text
+if (latestScheduled) {
+  // Only override if current start violates the dependency
+  const currentStart = updates.startDate || oldTask.startDate;
+  if (currentStart < latestScheduled.startDate) {
+    updates = { ...updates, startDate: latestScheduled.startDate, endDate: latestScheduled.endDate };
+  }
+}
+```
 
 ### Files Changed
 
-- `src/hooks/useProjectData.ts`: Update the reconciliation loop (~lines 443-542) to only shift dates when a dependency, constraint, or exclusion is actually violated
+- `src/components/TaskDialog.tsx`: Compare dependencies/exclusions before including in update payload
+- `src/hooks/useProjectData.ts`: Guard the date override in `updateTask` to only apply when the dependency is violated
 
 ### What Stays the Same
 
-- Dependency logic (unchanged -- still enforced, just not over-eagerly)
-- Constraint types and their behavior (unchanged)
-- Exclusion links (unchanged)
-- The cascade RPC (unchanged -- server-side cascading is only triggered on explicit dependency changes)
-- All UI components (unchanged)
+- Reconciliation loop (already fixed to be conditional)
+- Cascade RPC logic (unchanged)
 - All database schema and RLS policies (unchanged)
-
+- Dependency detection on actual dependency changes (still works -- adding/removing a dependency will still reschedule)
